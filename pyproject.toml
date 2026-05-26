@@ -1,0 +1,54 @@
+[project]
+name = "timebase-mcp"
+version = "0.1.1"
+description = "Model Context Protocol (MCP) server for TimeBase"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "mcp[cli]>=1.27.1,<1.28.0",
+    "pydantic>=2.13.3,<2.14.0",
+    "pydantic-settings>=2.14.0,<2.15.0",
+]
+
+[project.optional-dependencies]
+community = [
+    "dxapi-ce===6.2.1",
+]
+enterprise = [
+    "dxapi===5.5.72",
+]
+all = [
+    "dxapi===5.5.72",
+    "dxapi-ce===6.2.1",
+]
+
+[[tool.uv.index]]
+name = "nexus"
+url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/simple"
+authenticate = "always"
+
+[tool.uv.sources]
+dxapi = { index = "nexus" }
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "inline-snapshot>=0.32.7",
+    "pytest>=9.0.3",
+    "ruff>=0.15.11",
+]
+
+[tool.inline-snapshot]
+format-command="ruff check --fix-only --stdin-filename {filename} | ruff format --stdin-filename {filename}"
+
+[tool.pytest.ini_options]
+addopts = "-m \"not integration\""
+markers = [
+    "integration: tests that require a live TimeBase instance",
+]
+
+[project.scripts]
+timebase-mcp = "timebase_mcp.main:main"

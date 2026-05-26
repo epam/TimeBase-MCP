@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.ruff-cache/
+.ruff_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv
+venv/
+env/
+ENV/
+.python-version
+
+# IDE-specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env.local
+
+# MCPB build artifacts
+*.mcpb

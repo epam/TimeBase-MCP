@@ -1,0 +1,5 @@
+APP_NAME = "TimeBase MCP Server"
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+DEFAULT_TIMEBASE_URL = "dxtick://localhost:8011"
+DEFAULT_TRANSPORT = "stdio"
