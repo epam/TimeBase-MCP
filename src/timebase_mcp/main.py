@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from importlib import metadata
+import json
 import logging
 from pathlib import Path
 import signal
@@ -52,6 +53,19 @@ def load_settings() -> MCPSettings:
     try:
         return MCPSettings()
     except ValidationError as exc:
+        raw_settings = "<unavailable>"
+        try:
+            raw_settings = json.dumps(
+                MCPSettings.debug_log_payload_from_env(), sort_keys=True
+            )
+        except Exception:
+            pass
+
+        logger.error(
+            "Invalid TimeBase MCP configuration: %s. Raw settings: %s",
+            exc,
+            raw_settings,
+        )
         raise ConfigurationError("Invalid TimeBase MCP configuration.") from exc
 
 
@@ -83,7 +97,14 @@ def run_server() -> int:
     try:
         active_settings = load_settings()
         configure_logging(active_settings)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "TimeBase MCP configuration: %s",
+                json.dumps(active_settings.debug_log_payload(), sort_keys=True),
+            )
         active_server = build_server(active_settings)
+    except ConfigurationError:
+        return 1
     except Exception as exc:
         logger.error("Failed to start TimeBase MCP server: %s", exc)
         return 1

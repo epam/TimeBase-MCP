@@ -96,10 +96,10 @@ def build_settings() -> MCPSettings:
 
 def build_oauth2_settings() -> MCPSettings:
     return MCPSettings(
-        TIMEBASE_USERNAME="service-user",
-        TIMEBASE_OAUTH2_TOKEN_URL="https://idp.example/token",
-        TIMEBASE_OAUTH2_CLIENT_ID="client-id",
-        TIMEBASE_OAUTH2_CLIENT_SECRET=SecretStr("client-secret"),
+        tb_username="service-user",
+        tb_oauth2_token_url="https://idp.example/token",
+        tb_oauth2_client_id="client-id",
+        tb_oauth2_client_secret=SecretStr("client-secret"),
     )
 
 

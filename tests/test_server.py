@@ -178,10 +178,10 @@ async def test_call_get_server_configuration_tool_reports_enterprise_for_oauth2(
     client_session_factory,
 ) -> None:
     settings = MCPSettings(
-        TIMEBASE_USERNAME="service-user",
-        TIMEBASE_OAUTH2_TOKEN_URL="https://idp.example/token",
-        TIMEBASE_OAUTH2_CLIENT_ID="client-id",
-        TIMEBASE_OAUTH2_CLIENT_SECRET=SecretStr("client-secret"),
+        tb_username="service-user",
+        tb_oauth2_token_url="https://idp.example/token",
+        tb_oauth2_client_id="client-id",
+        tb_oauth2_client_secret=SecretStr("client-secret"),
     )
 
     async with client_session_factory(settings) as client_session:
@@ -200,7 +200,7 @@ async def test_call_get_server_configuration_tool_sanitizes_url_credentials(
     client_session_factory,
 ) -> None:
     settings = MCPSettings(
-        TIMEBASE_URL="dxtick://user:pass@timebase.example:8011",
+        tb_url="dxtick://user:pass@timebase.example:8011",
     )
 
     async with client_session_factory(settings) as client_session:

@@ -9,10 +9,12 @@ from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
 
 logger = logging.getLogger(__name__)
 
+_ENTERPRISE_MODULE_NAME = "dxapi"
+_COMMUNITY_MODULE_NAME = "dxapi_ce"
 _AUTO_EDITION_ORDER: tuple[Edition, ...] = ("enterprise", "community")
 _EDITION_DEPENDENCIES: dict[Edition, tuple[str, str]] = {
-    "enterprise": ("dxapi", "timebase-mcp[enterprise]"),
-    "community": ("dxapi_ce", "timebase-mcp[community]"),
+    "enterprise": (_ENTERPRISE_MODULE_NAME, "timebase-mcp[enterprise]"),
+    "community": (_COMMUNITY_MODULE_NAME, "timebase-mcp[community]"),
 }
 _EDITION_CLIENTS: dict[Edition, tuple[str, str]] = {
     "enterprise": (
@@ -142,14 +144,18 @@ def _create_client_for_edition(
                 "Using enterprise client for %s",
                 settings.tb_url,
             )
-            _require_dependency("dxapi", "Enterprise", "timebase-mcp[enterprise]")
+            _require_dependency(
+                _ENTERPRISE_MODULE_NAME, "Enterprise", "timebase-mcp[enterprise]"
+            )
             return client_class(settings, read_only=read_only)
         case "community":
             logger.debug(
                 "Using community client for %s",
                 settings.tb_url,
             )
-            _require_dependency("dxapi_ce", "Community", "timebase-mcp[community]")
+            _require_dependency(
+                _COMMUNITY_MODULE_NAME, "Community", "timebase-mcp[community]"
+            )
             return client_class(settings, read_only=read_only)
 
 
