@@ -126,7 +126,7 @@ async def test_call_get_server_configuration_tool(
     monkeypatch.setattr(
         client_factory,
         "_available_editions",
-        lambda: ("enterprise", "community"),
+        lambda _statuses=None: ("enterprise", "community"),
     )
 
     async with client_session_factory(None) as client_session:
@@ -198,7 +198,10 @@ async def test_call_get_server_configuration_tool_reports_enterprise_for_oauth2(
 @pytest.mark.anyio
 async def test_call_get_server_configuration_tool_sanitizes_url_credentials(
     client_session_factory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(client_factory, "_available_editions", lambda: ())
+
     settings = MCPSettings(
         tb_url="dxtick://user:pass@timebase.example:8011",
     )

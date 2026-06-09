@@ -8,7 +8,6 @@ from timebase_mcp.clients.base import TimeBaseClient
 from timebase_mcp.config import Edition, MCPSettings
 from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
 
-
 ClientOutcome = str | Exception
 
 
@@ -107,7 +106,7 @@ def patch_available_editions(
     monkeypatch: pytest.MonkeyPatch,
     *editions: Edition,
 ) -> None:
-    monkeypatch.setattr(factory, "_available_editions", lambda: editions)
+    monkeypatch.setattr(factory, "_available_editions", lambda _statuses=None: editions)
 
 
 def patch_create_client(
@@ -156,8 +155,96 @@ def test_create_timebase_client_raises_when_no_clients_are_installed(
     settings = build_settings()
     patch_available_editions(monkeypatch)
 
-    with pytest.raises(ConfigurationError, match="No TimeBase client is installed"):
+    with pytest.raises(ConfigurationError, match="No compatible TimeBase client"):
         factory.create_timebase_client(settings)
+
+
+def test_create_timebase_client_reports_incompatible_installed_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=["dxapi-ce===6.2.3 ; extra == 'community'"],
+        versions={"dxapi-ce": "6.2.1"},
+        modules={"dxapi_ce"},
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match=r"Community edition requires dxapi-ce===6\.2\.3; found dxapi-ce 6\.2\.1",
+    ):
+        factory.create_timebase_client(build_settings())
+
+
+def test_create_timebase_client_reports_all_incompatible_installed_clients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=[
+            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ce===6.2.3 ; extra == 'community'",
+        ],
+        versions={"dxapi": "5.5.72", "dxapi-ce": "6.2.1"},
+    )
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        factory.create_timebase_client(build_settings())
+
+    message = str(exc_info.value)
+    assert "Enterprise edition requires dxapi===5.5.73; found dxapi 5.5.72" in message
+    assert (
+        "Community edition requires dxapi-ce===6.2.3; found dxapi-ce 6.2.1" in message
+    )
+
+
+def test_create_timebase_client_warns_about_ignored_incompatible_client(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=[
+            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ce===6.2.3 ; extra == 'community'",
+        ],
+        versions={"dxapi": "5.5.72", "dxapi-ce": "6.2.3"},
+    )
+    client_state = ClientState()
+    patch_create_client(monkeypatch, client_state)
+
+    with caplog.at_level("WARNING"):
+        client = factory.create_timebase_client(build_settings())
+
+    assert isinstance(client, StubTimeBaseClient)
+    assert client.edition == "community"
+    assert "Ignoring incompatible enterprise TimeBase client" in caplog.text
+    assert "found dxapi 5.5.72" in caplog.text
+
+
+def test_create_timebase_client_reports_incompatible_required_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=[
+            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ce===6.2.3 ; extra == 'community'",
+        ],
+        versions={"dxapi": "5.5.73", "dxapi-ce": "6.2.1"},
+    )
+    client_state = ClientState(
+        outcomes={
+            "enterprise": TimeBaseConnectionError("Community version is required")
+        }
+    )
+    patch_create_client(monkeypatch, client_state)
+
+    with pytest.raises(
+        ConfigurationError,
+        match=r"Community edition requires dxapi-ce===6\.2\.3; found dxapi-ce 6\.2\.1",
+    ):
+        factory.create_timebase_client(build_settings())
 
 
 def test_create_timebase_client_prefers_enterprise_when_both_clients_connect(
@@ -305,3 +392,150 @@ def test_create_timebase_client_uses_cached_detected_edition(
         assert opened_client is client
 
     assert harness.client_state.opened_editions == ["community"]
+
+
+def patch_dependency_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    requirements: list[str],
+    versions: dict[str, str],
+    modules: set[str] | None = None,
+) -> None:
+    monkeypatch.setattr(
+        factory,
+        "_has_dependency",
+        lambda module_name: modules is None or module_name in modules,
+    )
+    monkeypatch.setattr(factory.metadata, "requires", lambda _dist_name: requirements)
+    monkeypatch.setattr(
+        factory.metadata,
+        "version",
+        lambda distribution_name: versions[distribution_name],
+    )
+
+
+def test_dependency_status_allows_matching_enterprise_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=["dxapi===5.5.73 ; extra == 'enterprise'"],
+        versions={"dxapi": "5.5.73"},
+    )
+
+    status = factory._dependency_status("enterprise")
+
+    assert status.compatible
+
+
+def test_dependency_status_rejects_old_enterprise_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=["dxapi===5.5.73 ; extra == 'enterprise'"],
+        versions={"dxapi": "5.5.72"},
+    )
+
+    status = factory._dependency_status("enterprise")
+
+    assert status.error is not None
+    assert "dxapi===5.5.73" in str(status.error)
+    assert "found dxapi 5.5.72" in str(status.error)
+    assert "timebase-mcp[enterprise]" in str(status.error)
+
+
+def test_dependency_status_uses_community_distribution_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked_modules: list[str] = []
+    checked_versions: list[str] = []
+
+    def fake_has_dependency(module_name: str) -> bool:
+        checked_modules.append(module_name)
+        return True
+
+    def fake_version(distribution_name: str) -> str:
+        checked_versions.append(distribution_name)
+        return "6.2.3"
+
+    monkeypatch.setattr(factory, "_has_dependency", fake_has_dependency)
+    monkeypatch.setattr(
+        factory.metadata,
+        "requires",
+        lambda _dist_name: ["dxapi-ce===6.2.3 ; extra == 'community'"],
+    )
+    monkeypatch.setattr(factory.metadata, "version", fake_version)
+
+    status = factory._dependency_status("community")
+
+    assert status.compatible
+    assert checked_modules == ["dxapi_ce"]
+    assert checked_versions == ["dxapi-ce"]
+
+
+@pytest.mark.parametrize(
+    ("installed_version", "raises"),
+    [
+        pytest.param("6.2.3", False, id="minimum-compatible"),
+        pytest.param("6.5.0", False, id="range-compatible"),
+        pytest.param("7.0.0", True, id="range-incompatible"),
+    ],
+)
+def test_dependency_status_supports_version_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+    installed_version: str,
+    raises: bool,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=["dxapi-ce>=6.2,<7 ; extra == 'community'"],
+        versions={"dxapi-ce": installed_version},
+    )
+
+    status = factory._dependency_status("community")
+
+    if raises:
+        assert status.error is not None
+        assert "dxapi-ce<7,>=6.2" in str(status.error)
+    else:
+        assert status.compatible
+
+
+def test_available_editions_excludes_incompatible_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_dependency_metadata(
+        monkeypatch,
+        requirements=[
+            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ce===6.2.3 ; extra == 'community'",
+        ],
+        versions={"dxapi": "5.5.72", "dxapi-ce": "6.2.3"},
+    )
+
+    assert factory._available_editions() == ("community",)
+
+
+def test_create_client_for_edition_validates_before_loading_client_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_load_client_class(_edition: Edition) -> type[TimeBaseClient]:
+        pytest.fail("_load_client_class should not be called before validation")
+
+    monkeypatch.setattr(
+        factory,
+        "_dependency_status",
+        lambda _edition: factory._DependencyStatus(
+            installed=True,
+            error=ConfigurationError("incompatible dependency"),
+        ),
+    )
+    monkeypatch.setattr(factory, "_load_client_class", fail_load_client_class)
+
+    with pytest.raises(ConfigurationError, match="incompatible dependency"):
+        factory._create_client_for_edition(
+            build_settings(),
+            "enterprise",
+            read_only=True,
+        )

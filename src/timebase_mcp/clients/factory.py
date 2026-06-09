@@ -1,7 +1,12 @@
-import logging
 import importlib.util
-from importlib import import_module
+import logging
+from dataclasses import dataclass
+from importlib import import_module, metadata
 from typing import cast
+
+from packaging.markers import default_environment
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 from timebase_mcp.clients.base import TimeBaseClient
 from timebase_mcp.config import Edition, MCPSettings
@@ -9,27 +14,52 @@ from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
 
 logger = logging.getLogger(__name__)
 
-_ENTERPRISE_MODULE_NAME = "dxapi"
-_COMMUNITY_MODULE_NAME = "dxapi_ce"
+_DIST_NAME = "timebase-mcp"
 _AUTO_EDITION_ORDER: tuple[Edition, ...] = ("enterprise", "community")
-_EDITION_DEPENDENCIES: dict[Edition, tuple[str, str]] = {
-    "enterprise": (_ENTERPRISE_MODULE_NAME, "timebase-mcp[enterprise]"),
-    "community": (_COMMUNITY_MODULE_NAME, "timebase-mcp[community]"),
-}
-_EDITION_CLIENTS: dict[Edition, tuple[str, str]] = {
-    "enterprise": (
-        "timebase_mcp.clients.enterprise",
-        "EnterpriseTimeBaseClient",
-    ),
-    "community": (
-        "timebase_mcp.clients.community",
-        "CommunityTimeBaseClient",
-    ),
-}
 _PROTOCOL_MISMATCH_MARKERS: tuple[str, ...] = (
     "enterprise version is required",
     "community version is required",
 )
+
+
+@dataclass(frozen=True)
+class _EditionInfo:
+    label: str
+    module_name: str
+    distribution_name: str
+    extra_name: str
+    client_module: str
+    client_class: str
+
+
+_EDITION_INFO: dict[Edition, _EditionInfo] = {
+    "enterprise": _EditionInfo(
+        label="Enterprise",
+        module_name="dxapi",
+        distribution_name="dxapi",
+        extra_name="timebase-mcp[enterprise]",
+        client_module="timebase_mcp.clients.enterprise",
+        client_class="EnterpriseTimeBaseClient",
+    ),
+    "community": _EditionInfo(
+        label="Community",
+        module_name="dxapi_ce",
+        distribution_name="dxapi-ce",
+        extra_name="timebase-mcp[community]",
+        client_module="timebase_mcp.clients.community",
+        client_class="CommunityTimeBaseClient",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class _DependencyStatus:
+    installed: bool
+    error: ConfigurationError | None = None
+
+    @property
+    def compatible(self) -> bool:
+        return self.installed and self.error is None
 
 
 def create_timebase_client(
@@ -53,10 +83,16 @@ def create_timebase_client(
             read_only=read_only,
         )
 
-    available_editions = _available_editions()
+    statuses = _dependency_statuses()
+    _log_incompatible_dependencies(statuses)
+    available_editions = _available_editions(statuses)
     if not available_editions:
+        incompatibility_error = _incompatible_clients_error(statuses)
+        if incompatibility_error is not None:
+            raise incompatibility_error
+
         raise ConfigurationError(
-            "No TimeBase client is installed. Install timebase-mcp[community] or timebase-mcp[enterprise]."
+            "No compatible TimeBase client is installed. Install or upgrade timebase-mcp[community] or timebase-mcp[enterprise]."
         )
 
     return _create_auto_detected_client(
@@ -100,9 +136,11 @@ def _create_auto_detected_client(
         if not _is_protocol_mismatch(str(exc)):
             raise
 
-        fallback_edition = _alternate_edition(preferred_edition)
+        fallback_edition: Edition = (
+            "community" if preferred_edition == "enterprise" else "enterprise"
+        )
         if fallback_edition not in available_editions:
-            raise _missing_required_client_error(settings, fallback_edition) from exc
+            raise _required_client_error(settings, fallback_edition) from exc
 
         logger.info(
             "Retrying TimeBase connection to %s with %s client after protocol mismatch",
@@ -136,40 +174,33 @@ def _create_client_for_edition(
     *,
     read_only: bool,
 ) -> TimeBaseClient:
-    client_class = _load_client_class(edition)
+    logger.debug("Using %s client for %s", edition, settings.tb_url)
+    status = _dependency_status(edition)
+    if not status.installed:
+        raise ConfigurationError(
+            f"{_EDITION_INFO[edition].label} edition requires installing {_EDITION_INFO[edition].extra_name}"
+        )
+    if status.error is not None:
+        raise status.error
 
-    match edition:
-        case "enterprise":
-            logger.debug(
-                "Using enterprise client for %s",
-                settings.tb_url,
-            )
-            _require_dependency(
-                _ENTERPRISE_MODULE_NAME, "Enterprise", "timebase-mcp[enterprise]"
-            )
-            return client_class(settings, read_only=read_only)
-        case "community":
-            logger.debug(
-                "Using community client for %s",
-                settings.tb_url,
-            )
-            _require_dependency(
-                _COMMUNITY_MODULE_NAME, "Community", "timebase-mcp[community]"
-            )
-            return client_class(settings, read_only=read_only)
+    client_class = _load_client_class(edition)
+    return client_class(settings, read_only=read_only)
 
 
 def _load_client_class(edition: Edition) -> type[TimeBaseClient]:
-    module_name, class_name = _EDITION_CLIENTS[edition]
-    module = import_module(module_name)
-    return cast(type[TimeBaseClient], getattr(module, class_name))
+    info = _EDITION_INFO[edition]
+    module = import_module(info.client_module)
+    return cast(type[TimeBaseClient], getattr(module, info.client_class))
 
 
-def _available_editions() -> tuple[Edition, ...]:
+def _available_editions(
+    statuses: dict[Edition, _DependencyStatus] | None = None,
+) -> tuple[Edition, ...]:
+    if statuses is None:
+        statuses = _dependency_statuses()
+
     return tuple(
-        edition
-        for edition in _AUTO_EDITION_ORDER
-        if _has_dependency(_EDITION_DEPENDENCIES[edition][0])
+        edition for edition in _AUTO_EDITION_ORDER if statuses[edition].compatible
     )
 
 
@@ -178,27 +209,107 @@ def _is_protocol_mismatch(message: str) -> bool:
     return any(marker in normalized_message for marker in _PROTOCOL_MISMATCH_MARKERS)
 
 
-def _alternate_edition(edition: Edition) -> Edition:
-    if edition == "enterprise":
-        return "community"
-    return "enterprise"
-
-
-def _missing_required_client_error(
+def _required_client_error(
     settings: MCPSettings,
     edition: Edition,
 ) -> ConfigurationError:
-    _, extra_name = _EDITION_DEPENDENCIES[edition]
+    status = _dependency_status(edition)
+    if status.error is not None:
+        return status.error
+
     return ConfigurationError(
-        f"TimeBase server at '{settings.tb_url}' requires the {edition} client. Install {extra_name}."
+        f"TimeBase server at '{settings.tb_url}' requires the {edition} client. Install {_EDITION_INFO[edition].extra_name}."
     )
 
 
-def _require_dependency(module_name: str, edition: str, extra_name: str) -> None:
-    if _has_dependency(module_name):
-        return
+def _dependency_statuses() -> dict[Edition, _DependencyStatus]:
+    return {edition: _dependency_status(edition) for edition in _AUTO_EDITION_ORDER}
 
-    raise ConfigurationError(f"{edition} edition requires installing {extra_name}")
+
+def _dependency_status(edition: Edition) -> _DependencyStatus:
+    info = _EDITION_INFO[edition]
+    if not _has_dependency(info.module_name):
+        return _DependencyStatus(installed=False)
+
+    requirement = _dependency_requirement(info.distribution_name, edition)
+    if requirement is None:
+        return _DependencyStatus(installed=True)
+
+    try:
+        installed_version = metadata.version(info.distribution_name)
+    except metadata.PackageNotFoundError:
+        return _DependencyStatus(
+            installed=True,
+            error=ConfigurationError(
+                f"{info.label} edition requires installing {info.extra_name}; found importable module "
+                f"{info.module_name!r}, but package metadata for {info.distribution_name!r} is unavailable."
+            ),
+        )
+
+    if requirement.specifier and not requirement.specifier.contains(
+        installed_version,
+        prereleases=True,
+    ):
+        return _DependencyStatus(
+            installed=True,
+            error=ConfigurationError(
+                f"{info.label} edition requires {requirement.name}{requirement.specifier}; "
+                f"found {info.distribution_name} {installed_version}. Install or upgrade {info.extra_name}."
+            ),
+        )
+
+    return _DependencyStatus(installed=True)
+
+
+def _incompatible_clients_error(
+    statuses: dict[Edition, _DependencyStatus],
+) -> ConfigurationError | None:
+    messages = [
+        str(status.error)
+        for status in (statuses[edition] for edition in _AUTO_EDITION_ORDER)
+        if status.installed and status.error is not None
+    ]
+    if not messages:
+        return None
+
+    return ConfigurationError(" ".join(messages))
+
+
+def _log_incompatible_dependencies(statuses: dict[Edition, _DependencyStatus]) -> None:
+    for edition in _AUTO_EDITION_ORDER:
+        status = statuses[edition]
+        if status.error is not None:
+            logger.warning(
+                "Ignoring incompatible %s TimeBase client: %s", edition, status.error
+            )
+
+
+def _dependency_requirement(distribution_name: str, extra: str) -> Requirement | None:
+    try:
+        requirements = metadata.requires(_DIST_NAME) or []
+    except metadata.PackageNotFoundError:
+        return None
+
+    expected_name = canonicalize_name(distribution_name)
+    environment = cast(dict[str, str], default_environment()) | {"extra": extra}
+
+    for requirement_text in requirements:
+        try:
+            requirement = Requirement(requirement_text)
+        except InvalidRequirement:
+            continue
+
+        if canonicalize_name(requirement.name) != expected_name:
+            continue
+
+        if requirement.marker is not None and not requirement.marker.evaluate(
+            environment
+        ):
+            continue
+
+        return requirement
+
+    return None
 
 
 def _has_dependency(module_name: str) -> bool:
