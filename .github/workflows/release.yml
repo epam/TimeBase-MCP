@@ -199,6 +199,7 @@ jobs:
           PRERELEASE: ${{ needs.build.outputs.prerelease }}
         run: |
           args=(
+            "--repo=${GITHUB_REPOSITORY}"
             "--target=${GITHUB_SHA}"
             "--generate-notes"
             "--title=${TAG}"
@@ -209,4 +210,4 @@ jobs:
             args+=("--prerelease" "--latest=false")
           fi
 
-          gh release create "${TAG}" dist/* "${args[@]}"
+          gh release create "${TAG}" "${args[@]}" dist/*
