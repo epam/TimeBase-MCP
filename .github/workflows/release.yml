@@ -135,7 +135,7 @@ jobs:
           if f"Version: {version}" not in metadata:
               raise SystemExit(f"Wheel metadata does not contain Version: {version}.")
 
-          forbidden_requirement_fragments = ("nexus.deltixhub.com")
+          forbidden_requirement_fragments = ("nexus.deltixhub.com",)
           requires_dist_lines = [
               line for line in metadata.splitlines() if line.startswith("Requires-Dist:")
           ]
