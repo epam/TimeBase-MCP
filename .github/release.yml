@@ -1,0 +1,29 @@
+# Configuration for GitHub's automatically generated release notes.
+# Docs: https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+changelog:
+  exclude:
+    labels:
+      - release-note:skip
+      - duplicate
+      - invalid
+      - question
+      - wontfix
+  categories:
+    - title: Breaking changes
+      labels:
+        - release-note:breaking
+    - title: Features
+      labels:
+        - release-note:feature
+    - title: Fixes
+      labels:
+        - release-note:fix
+    - title: Documentation
+      labels:
+        - release-note:docs
+    - title: CI
+      labels:
+        - release-note:ci
+    - title: Other changes
+      labels:
+        - "*"
