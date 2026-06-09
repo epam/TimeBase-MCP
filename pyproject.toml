@@ -12,14 +12,14 @@ dependencies = [
 
 [project.optional-dependencies]
 community = [
-    "dxapi-ce===6.2.1",
+    "dxapi-ce===6.2.3",
 ]
 enterprise = [
-    "dxapi===5.5.72",
+    "dxapi===5.5.73",
 ]
 all = [
-    "dxapi===5.5.72",
-    "dxapi-ce===6.2.1",
+    "dxapi===5.5.73",
+    "dxapi-ce===6.2.3",
 ]
 
 [[tool.uv.index]]
