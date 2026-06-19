@@ -1,0 +1,12 @@
+[
+  {
+    "name": "enterprise",
+    "description": "Enterprise TimeBase",
+    "url": "dxtick://localhost:8011"
+  },
+  {
+    "name": "community",
+    "description": "Community TimeBase",
+    "url": "dxtick://localhost:8012"
+  }
+]
