@@ -4,12 +4,12 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.config import MCPSettings
 from timebase_mcp.errors import (
     ConfigurationError,
     StreamNotFoundError,
     TimeBaseConnectionError,
 )
+from timebase_mcp.instance import TimeBaseInstanceConfig
 
 if TYPE_CHECKING:
     import dxapi_ce as dxapi_ce_types
@@ -26,8 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 class CommunityTimeBaseClient(TimeBaseClient):
-    def __init__(self, settings: MCPSettings, *, read_only: bool = True) -> None:
-        super().__init__(settings, read_only=read_only)
+    def __init__(
+        self,
+        config: TimeBaseInstanceConfig,
+        *,
+        read_only: bool = False,
+    ) -> None:
+        super().__init__(config, read_only=read_only)
         self._db: dxapi_ce_types.TickDb | None = None
 
     def open(self) -> dxapi_ce_types.TickDb:
@@ -37,31 +42,76 @@ class CommunityTimeBaseClient(TimeBaseClient):
         self._ensure_dxapi_ce()
         assert dxapi_ce is not None
         password = None
-        if self._settings.tb_password is not None:
-            password = self._settings.tb_password.get_secret_value()
+        if self._config.tb_password is not None:
+            password = self._config.tb_password.get_secret_value()
 
         try:
-            if self._settings.tb_username is None and password is None:
-                db = dxapi_ce.TickDb.createFromUrl(self._settings.tb_url)
+            if self._config.access_token is not None:
+                username = (
+                    self._config.access_token_username
+                    or self._config.tb_username
+                    or "oauth"
+                )
+                db = dxapi_ce.TickDb.createFromUrl(
+                    self._config.tb_url, username, self._config.access_token
+                )
+            elif self._config.tb_username is None and password is None:
+                db = dxapi_ce.TickDb.createFromUrl(self._config.tb_url)
             else:
-                username = self._settings.tb_username
+                username = self._config.tb_username
                 assert username is not None
                 assert password is not None
                 db = dxapi_ce.TickDb.createFromUrl(
-                    self._settings.tb_url, username, password
+                    self._config.tb_url, username, password
                 )
             db.open(self._read_only)
         except Exception as exc:
+            hint = self._connection_error_hint(exc)
             raise TimeBaseConnectionError(
-                f"Failed to connect to TimeBase at '{self._settings.tb_url}': {exc}"
+                f"Failed to connect to TimeBase at '{self._config.tb_url}': {exc}{hint}"
             ) from exc
 
         logger.info(
             "Connected to TimeBase via community client at %s",
-            self._settings.tb_url,
+            self._config.tb_url,
         )
         self._db = db
         return db
+
+    def _connection_error_hint(self, exc: Exception) -> str:
+        message = str(exc)
+        normalized = message.casefold()
+        hints: list[str] = []
+
+        if "certificate verification" in normalized or "ssl" in normalized:
+            hints.append(
+                "For TLS/certificate issues, use DXAPI_SSL_CERT_FILE with a DER "
+                "certificate, or DXAPI_SSL_TRUST_ALL=true for non-production testing."
+            )
+
+        if "timed out" in normalized or "timeout" in normalized:
+            hints.append(
+                "If this TimeBase endpoint is behind an HTTPS/TLS terminator, "
+                "set DXAPI_SSL_TERMINATION=true."
+            )
+
+        if "wrong username or password" in normalized and self._config.auth_mode in (
+            "auto",
+            "none",
+        ):
+            hints.append(
+                "The server looks protected but MCP connected without credentials. "
+                "Interactive OAuth requires the enterprise dxapi client."
+            )
+
+        if self._config.auto_auth_error:
+            hints.append(
+                f"OAuth auto-discovery failed earlier: {self._config.auto_auth_error}"
+            )
+
+        if not hints:
+            return ""
+        return " " + " ".join(hints)
 
     def close(self) -> None:
         if self._db is None:

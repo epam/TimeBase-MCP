@@ -3,16 +3,18 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from timebase_mcp.auth.token_verifier import decode_claims_unverified
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.config import MCPSettings
 from timebase_mcp.constants import APP_NAME
 from timebase_mcp.errors import (
     ConfigurationError,
     StreamNotFoundError,
     TimeBaseConnectionError,
 )
-from timebase_mcp.oauth2 import (
+from timebase_mcp.instance import TimeBaseInstanceConfig
+from timebase_mcp.auth.oauth2 import (
     OAuth2AccessTokenProvider,
+    OAuth2ClientCredentialsConfig,
     get_oauth2_provider,
 )
 
@@ -31,10 +33,20 @@ logger = logging.getLogger(__name__)
 
 
 class EnterpriseTimeBaseClient(TimeBaseClient):
-    def __init__(self, settings: MCPSettings, *, read_only: bool = True) -> None:
+    def __init__(
+        self,
+        settings: TimeBaseInstanceConfig,
+        *,
+        read_only: bool = False,
+    ) -> None:
         super().__init__(settings, read_only=read_only)
         self._db: dxapi_types.TickDb | None = None
         self._oauth2_provider: OAuth2AccessTokenProvider | None = None
+        self._token_provider: OAuth2AccessTokenProvider | None = None
+
+    def set_token_provider(self, provider: OAuth2AccessTokenProvider) -> None:
+        """Provide the interactive-login token source for ``interactive`` mode."""
+        self._token_provider = provider
 
     def open(self) -> dxapi_types.TickDb:
         if self._db is not None and self._db.isOpen():
@@ -44,48 +56,26 @@ class EnterpriseTimeBaseClient(TimeBaseClient):
         assert dxapi is not None
 
         try:
-            oauth2_config = self._settings.oauth2_config
-            if oauth2_config is not None:
-                username = self._settings.tb_username
-                assert username is not None
-
-                try:
-                    provider = get_oauth2_provider(
-                        oauth2_config,
-                        provider=self._oauth2_provider,
-                    )
-                    self._oauth2_provider = provider
-                    access_token = provider.get_access_token()
-                except (ValueError, PermissionError, ConnectionError) as exc:
-                    raise TimeBaseConnectionError(
-                        "Failed to obtain OAuth2 credentials for TimeBase at "
-                        f"'{self._settings.tb_url}': {exc}"
-                    ) from exc
-
-                logger.debug(
-                    "Obtained OAuth2 access token for TimeBase at %s using client ID %s",
-                    self._settings.tb_url,
-                    oauth2_config.client_id,
-                )
-
+            username, access_token = self._resolve_token_credentials()
+            if username is not None and access_token is not None:
                 db = dxapi.TickDb.createFromUrl(
-                    self._settings.tb_url,
+                    self._config.tb_url,
                     username,
                     access_token,
                 )
             else:
                 password = None
-                if self._settings.tb_password is not None:
-                    password = self._settings.tb_password.get_secret_value()
+                if self._config.tb_password is not None:
+                    password = self._config.tb_password.get_secret_value()
 
-                if self._settings.tb_username is None and password is None:
-                    db = dxapi.TickDb.createFromUrl(self._settings.tb_url)
+                if self._config.tb_username is None and password is None:
+                    db = dxapi.TickDb.createFromUrl(self._config.tb_url)
                 else:
-                    username = self._settings.tb_username
-                    assert username is not None
+                    basic_username = self._config.tb_username
+                    assert basic_username is not None
                     assert password is not None
                     db = dxapi.TickDb.createFromUrl(
-                        self._settings.tb_url, username, password
+                        self._config.tb_url, basic_username, password
                     )
 
             db.setApplicationName(APP_NAME)
@@ -93,16 +83,140 @@ class EnterpriseTimeBaseClient(TimeBaseClient):
         except TimeBaseConnectionError:
             raise
         except Exception as exc:
+            hint = self._connection_error_hint(exc)
             raise TimeBaseConnectionError(
-                f"Failed to connect to TimeBase at '{self._settings.tb_url}': {exc}"
+                f"Failed to connect to TimeBase at '{self._config.tb_url}': {exc}{hint}"
             ) from exc
 
         logger.info(
-            "Connected to TimeBase via enterprise client at %s",
-            self._settings.tb_url,
+            "Connected to TimeBase via enterprise client at %s (read-only=%s)",
+            self._config.tb_url,
+            self._read_only,
         )
         self._db = db
         return db
+
+    def _resolve_token_credentials(self) -> tuple[str | None, str | None]:
+        """Return `(username, access_token)` for token-based outbound auth.
+
+        Returns ``(None, None)`` when token auth does not apply, so the caller
+        falls back to basic / anonymous connection.
+        """
+        config = self._config
+
+        if config.access_token is not None:
+            username = self._username_for_token(
+                config.access_token,
+                config.access_token_username or config.tb_username,
+            )
+            logger.debug(
+                "Connecting to TimeBase at %s with forwarded caller identity.",
+                config.tb_url,
+            )
+            return username, config.access_token
+
+        if config.auth_mode == "interactive":
+            token = self._interactive_token()
+            username = self._username_for_token(token, config.tb_username)
+            return username, token
+
+        oauth2_config = config.oauth2_config
+        if oauth2_config is not None:
+            username = config.tb_username
+            assert username is not None
+            return username, self._client_credentials_token(oauth2_config)
+
+        return None, None
+
+    def _client_credentials_token(
+        self,
+        oauth2_config: OAuth2ClientCredentialsConfig,
+    ) -> str:
+        try:
+            provider = get_oauth2_provider(
+                oauth2_config,
+                provider=self._oauth2_provider,
+            )
+            self._oauth2_provider = provider
+            access_token = provider.get_access_token()
+        except (ValueError, PermissionError, ConnectionError) as exc:
+            raise TimeBaseConnectionError(
+                "Failed to obtain OAuth2 credentials for TimeBase at "
+                f"'{self._config.tb_url}': {exc}"
+            ) from exc
+
+        logger.debug(
+            "Obtained OAuth2 access token for TimeBase at %s using client ID %s",
+            self._config.tb_url,
+            oauth2_config.client_id,
+        )
+        return access_token
+
+    def _interactive_token(self) -> str:
+        if self._token_provider is None:
+            raise TimeBaseConnectionError(
+                "Interactive login is not configured for TimeBase at "
+                f"'{self._config.tb_url}'."
+            )
+
+        try:
+            return self._token_provider.get_access_token()
+        except (ValueError, PermissionError, ConnectionError) as exc:
+            raise TimeBaseConnectionError(
+                "Interactive login to TimeBase at "
+                f"'{self._config.tb_url}' failed: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _username_for_token(token: str, explicit_username: str | None) -> str:
+        if explicit_username is not None:
+            return explicit_username
+
+        claims = decode_claims_unverified(token)
+        for claim_name in ("preferred_username", "username", "upn", "email", "sub"):
+            value = claims.get(claim_name)
+            if isinstance(value, str) and value:
+                return value
+
+        return "oauth"
+
+    def _connection_error_hint(self, exc: Exception) -> str:
+        message = str(exc)
+        normalized = message.casefold()
+        hints: list[str] = []
+
+        if "certificate verification" in normalized or "ssl" in normalized:
+            hints.append(
+                "For TLS/certificate issues, use DXAPI_SSL_CERT_FILE with a DER "
+                "certificate, or DXAPI_SSL_TRUST_ALL=true for non-production testing."
+            )
+
+        if "timed out" in normalized or "timeout" in normalized:
+            hints.append(
+                "If this TimeBase endpoint is behind an HTTPS/TLS terminator, "
+                "set DXAPI_SSL_TERMINATION=true or let local auto auth discover "
+                "the HTTPS /tb/oauthinfo endpoint before connecting."
+            )
+
+        if "wrong username or password" in normalized and self._config.auth_mode in (
+            "auto",
+            "none",
+        ):
+            hints.append(
+                "The server looks protected but MCP connected without credentials. "
+                "For local MCP, use URL-only auto auth or set "
+                "TIMEBASE_AUTH_MODE=interactive. For remote MCP, configure "
+                "forward_identity or a service account."
+            )
+
+        if self._config.auto_auth_error:
+            hints.append(
+                f"OAuth auto-discovery failed earlier: {self._config.auto_auth_error}"
+            )
+
+        if not hints:
+            return ""
+        return " " + " ".join(hints)
 
     def close(self) -> None:
         if self._db is None:

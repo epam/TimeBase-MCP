@@ -1,8 +1,10 @@
+import json
+
 import pytest
 from pydantic import SecretStr
 from pydantic import ValidationError
 
-from timebase_mcp.config import MCPSettings, SETTINGS_ENV_VARS, SettingsEnv
+from timebase_mcp.config import MCPSettings, SettingsEnv
 from timebase_mcp.constants import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -11,16 +13,7 @@ from timebase_mcp.constants import (
 )
 
 
-def clear_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for variable_name in SETTINGS_ENV_VARS:
-        monkeypatch.delenv(variable_name, raising=False)
-
-
-def test_settings_use_defaults_when_environment_is_not_set(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clear_settings_env(monkeypatch)
-
+def test_settings_use_defaults_when_environment_is_not_set() -> None:
     settings = MCPSettings()
 
     assert settings.tb_url == DEFAULT_TIMEBASE_URL
@@ -39,10 +32,11 @@ def test_settings_use_defaults_when_environment_is_not_set(
     assert settings.host == DEFAULT_HOST
     assert settings.port == DEFAULT_PORT
     assert settings.log_level == "INFO"
+    assert settings.max_concurrent_ops == 0
+    assert settings.operation_timeout_seconds == 0
 
 
 def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_URL, "dxtick://timebase.example:8011")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "alice")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "secret")
@@ -50,6 +44,8 @@ def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv(SettingsEnv.MCP_HOST, "0.0.0.0")
     monkeypatch.setenv(SettingsEnv.MCP_PORT, "8080")
     monkeypatch.setenv(SettingsEnv.MCP_LOG_LEVEL, "debug")
+    monkeypatch.setenv(SettingsEnv.MCP_MAX_CONCURRENT_OPS, "4")
+    monkeypatch.setenv(SettingsEnv.MCP_OPERATION_TIMEOUT_SECONDS, "30")
 
     settings = MCPSettings()
 
@@ -62,6 +58,8 @@ def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.host == "0.0.0.0"
     assert settings.port == 8080
     assert settings.log_level == "DEBUG"
+    assert settings.max_concurrent_ops == 4
+    assert settings.operation_timeout_seconds == 30
     assert settings.oauth2_config is None
     assert settings.uses_oauth2 is False
 
@@ -69,7 +67,6 @@ def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> N
 def test_settings_parse_oauth2_environment_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "service-user")
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL, "https://idp.example/token"
@@ -113,7 +110,6 @@ def test_settings_parse_oauth2_environment_values(
 def test_settings_default_oauth2_username_to_client_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL, "https://idp.example/token"
     )
@@ -146,7 +142,6 @@ def test_settings_normalize_oauth2_scope_list_input() -> None:
 def test_settings_ignore_empty_environment_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_URL, "")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "")
@@ -159,6 +154,8 @@ def test_settings_ignore_empty_environment_values(
     monkeypatch.setenv(SettingsEnv.MCP_HOST, "")
     monkeypatch.setenv(SettingsEnv.MCP_PORT, "")
     monkeypatch.setenv(SettingsEnv.MCP_LOG_LEVEL, "")
+    monkeypatch.setenv(SettingsEnv.MCP_MAX_CONCURRENT_OPS, "")
+    monkeypatch.setenv(SettingsEnv.MCP_OPERATION_TIMEOUT_SECONDS, "")
 
     settings = MCPSettings()
 
@@ -174,24 +171,40 @@ def test_settings_ignore_empty_environment_values(
     assert settings.host == DEFAULT_HOST
     assert settings.port == DEFAULT_PORT
     assert settings.log_level == "INFO"
+    assert settings.max_concurrent_ops == 0
+    assert settings.operation_timeout_seconds == 0
     assert settings.oauth2_config is None
     assert settings.uses_oauth2 is False
+
+
+@pytest.mark.parametrize(
+    ("environment_variable", "value"),
+    [
+        (SettingsEnv.MCP_MAX_CONCURRENT_OPS, "-1"),
+        (SettingsEnv.MCP_OPERATION_TIMEOUT_SECONDS, "-5"),
+    ],
+)
+def test_settings_raise_validation_error_for_invalid_guardrail_values(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_variable: str,
+    value: str,
+) -> None:
+    monkeypatch.setenv(environment_variable, value)
+
+    with pytest.raises(ValidationError):
+        MCPSettings()
 
 
 def test_settings_raise_validation_error_for_invalid_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.MCP_PORT, "not-an-int")
 
     with pytest.raises(ValidationError):
         MCPSettings()
 
 
-def test_settings_store_detected_edition(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clear_settings_env(monkeypatch)
+def test_settings_store_detected_edition() -> None:
     settings = MCPSettings()
     settings.set_detected_edition("community")
 
@@ -201,7 +214,6 @@ def test_settings_store_detected_edition(
 def test_settings_raise_validation_error_for_invalid_log_level(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.MCP_LOG_LEVEL, "verbose")
 
     with pytest.raises(ValidationError):
@@ -211,7 +223,6 @@ def test_settings_raise_validation_error_for_invalid_log_level(
 def test_settings_raise_validation_error_for_partial_auth_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "testuser")
 
     with pytest.raises(ValidationError, match="both be set or both be unset"):
@@ -221,7 +232,6 @@ def test_settings_raise_validation_error_for_partial_auth_configuration(
 def test_settings_extract_basic_auth_credentials_from_timebase_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_URL, "dxtick://user:pass@timebase.example:8011"
     )
@@ -237,7 +247,6 @@ def test_settings_extract_basic_auth_credentials_from_timebase_url(
 def test_settings_extract_basic_auth_credentials_from_cluster_timebase_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_URL,
         "dxctick://user:pass@host1:8010|host2:8011|host3:8012",
@@ -254,7 +263,6 @@ def test_settings_extract_basic_auth_credentials_from_cluster_timebase_url(
 def test_settings_raise_validation_error_for_conflicting_username_between_url_and_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_URL, "dxtick://user:pass@timebase.example:8011"
     )
@@ -268,7 +276,6 @@ def test_settings_raise_validation_error_for_conflicting_username_between_url_an
 def test_settings_raise_validation_error_for_conflicting_password_between_url_and_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_URL, "dxtick://user:pass@timebase.example:8011"
     )
@@ -282,7 +289,6 @@ def test_settings_raise_validation_error_for_conflicting_password_between_url_an
 def test_settings_allow_matching_credentials_between_url_and_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_URL, "dxtick://user:pass@timebase.example:8011"
     )
@@ -300,7 +306,6 @@ def test_settings_allow_matching_credentials_between_url_and_env(
 def test_settings_raise_validation_error_for_partial_oauth2_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "service-user")
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL, "https://idp.example/token"
@@ -316,7 +321,6 @@ def test_settings_raise_validation_error_for_partial_oauth2_configuration(
 def test_settings_allow_oauth2_without_username(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL, "https://idp.example/token"
     )
@@ -331,7 +335,6 @@ def test_settings_allow_oauth2_without_username(
 def test_settings_raise_validation_error_for_password_and_oauth2_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "service-user")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "secret")
     monkeypatch.setenv(
@@ -347,7 +350,6 @@ def test_settings_raise_validation_error_for_password_and_oauth2_configuration(
 def test_settings_raise_validation_error_for_invalid_oauth2_token_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "service-user")
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL, "https://idp.example/token"
@@ -363,7 +365,6 @@ def test_settings_raise_validation_error_for_invalid_oauth2_token_params(
 def test_settings_raise_validation_error_for_reserved_oauth2_token_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL, "https://idp.example/token"
     )
@@ -375,3 +376,37 @@ def test_settings_raise_validation_error_for_reserved_oauth2_token_params(
 
     with pytest.raises(ValidationError, match="cannot override reserved"):
         MCPSettings()
+
+
+def test_servers_print_emits_quoted_json_string(
+    tmp_path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    servers_file = tmp_path / "servers.json"
+    servers_file.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "enterprise",
+                    "description": "Enterprise TimeBase",
+                    "url": "dxtick://localhost:8011",
+                },
+                {"name": "community", "url": "dxtick://localhost:8012"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    from timebase_mcp.main import main
+
+    exit_code = main(["servers-print", str(servers_file)])
+
+    captured = capsys.readouterr()
+    compact = (
+        '[{"name":"enterprise","description":"Enterprise TimeBase",'
+        '"url":"dxtick://localhost:8011","auth_mode":"auto"},'
+        '{"name":"community","url":"dxtick://localhost:8012","auth_mode":"auto"}]'
+    )
+    assert exit_code == 0
+    assert captured.out == json.dumps(compact) + "\n"
+    assert captured.err == ""

@@ -1,13 +1,22 @@
-from mcp.server.fastmcp import FastMCP
+from typing import Annotated
+
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.session import ServerSession
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from timebase_mcp.config import MCPSettings
 from timebase_mcp.models import CompileQQLResult
-from timebase_mcp.operations import run_with_client
+from timebase_mcp.operations import run_with_context
+from timebase_mcp.runtime import TimeBaseRuntime
+
+InstanceName = Annotated[
+    str | None,
+    Field(description="TB instance key."),
+]
 
 
-def register_query_tools(mcp: FastMCP, settings: MCPSettings) -> None:
+def register_query_tools(mcp: FastMCP) -> None:
+
     @mcp.tool(
         name="execute_query",
         description="Execute a TimeBase QQL query",
@@ -19,7 +28,9 @@ def register_query_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             openWorldHint=True,
         ),
     )
-    def execute_query(
+    async def execute_query(
+        ctx: Context[ServerSession, TimeBaseRuntime],
+        instance_key: InstanceName = None,
         query: str = Field(description="TimeBase QQL query text"),
         limit: int = Field(
             default=50,
@@ -28,10 +39,10 @@ def register_query_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             description="Maximum number of result rows to include in preview text",
         ),
     ) -> str:
-        return run_with_client(
-            settings,
+        return await run_with_context(
+            ctx,
             lambda client: client.execute_query(query, limit),
-            read_only=False,
+            instance_key=instance_key,
         )
 
     @mcp.tool(
@@ -47,13 +58,15 @@ def register_query_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             openWorldHint=True,
         ),
     )
-    def compile_query(
+    async def compile_query(
+        ctx: Context[ServerSession, TimeBaseRuntime],
+        instance_key: InstanceName = None,
         query: str = Field(description="TimeBase QQL query text"),
     ) -> CompileQQLResult:
-        return run_with_client(
-            settings,
+        return await run_with_context(
+            ctx,
             lambda client: client.compile_query(query),
-            read_only=True,
+            instance_key=instance_key,
         )
 
     _ = (execute_query, compile_query)

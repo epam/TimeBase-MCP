@@ -6,12 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from timebase_mcp.config import SETTINGS_ENV_VARS, SettingsEnv
-
-
-def clear_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for variable_name in SETTINGS_ENV_VARS:
-        monkeypatch.delenv(variable_name, raising=False)
+from timebase_mcp.config import SettingsEnv
 
 
 @pytest.fixture
@@ -71,12 +66,79 @@ def test_run_server_does_not_log_configuration_at_info(
     assert "TimeBase MCP configuration:" not in caplog.text
 
 
+def test_run_server_warns_for_unlimited_remote_http(
+    main_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = main_module.MCPSettings(
+        transport="streamable-http",
+        host="0.0.0.0",
+        auth_api_keys_file="/var/run/keys.json",
+        max_concurrent_ops=0,
+    )
+    fake_server = Mock()
+    fake_server.run.side_effect = KeyboardInterrupt()
+
+    monkeypatch.setattr(main_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(main_module, "build_server", lambda settings=None: fake_server)
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = main_module.run_server()
+
+    assert exit_code == 130
+    assert "MCP_MAX_CONCURRENT_OPS=0 disables admission control" in caplog.text
+
+
+def test_run_server_does_not_warn_for_limited_remote_http(
+    main_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = main_module.MCPSettings(
+        transport="streamable-http",
+        host="0.0.0.0",
+        auth_api_keys_file="/var/run/keys.json",
+        max_concurrent_ops=10,
+    )
+    fake_server = Mock()
+    fake_server.run.side_effect = KeyboardInterrupt()
+
+    monkeypatch.setattr(main_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(main_module, "build_server", lambda settings=None: fake_server)
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = main_module.run_server()
+
+    assert exit_code == 130
+    assert "MCP_MAX_CONCURRENT_OPS=0 disables admission control" not in caplog.text
+
+
+def test_run_server_does_not_warn_for_stdio_unlimited_ops(
+    main_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = main_module.MCPSettings(max_concurrent_ops=0)
+    fake_server = Mock()
+    fake_server.run.side_effect = KeyboardInterrupt()
+
+    monkeypatch.setattr(main_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(main_module, "build_server", lambda settings=None: fake_server)
+    monkeypatch.setattr(main_module, "_should_log_terminal_status", lambda: False)
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = main_module.run_server()
+
+    assert exit_code == 130
+    assert "MCP_MAX_CONCURRENT_OPS=0 disables admission control" not in caplog.text
+
+
 def test_load_settings_logs_redacted_configuration_on_validation_error(
     main_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "service-user")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "secret")
     monkeypatch.setenv(
@@ -111,7 +173,6 @@ def test_load_settings_keeps_configuration_error_when_payload_rendering_fails(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    clear_settings_env(monkeypatch)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "service-user")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "secret")
     monkeypatch.setenv(
