@@ -1,5 +1,14 @@
 # TimeBase MCP
 
+<!-- TODO: Replace this README with README.v0.2.md when v0.2 is released -->
+
+> [!NOTE]
+> **This README documents v0.1 of the TimeBase MCP.**
+>
+> Pre-releases are published as `0.2.0rcN` and can be installed with an explicit pin. See [`README.v0.2.md`](README.v0.2.md) for the v0.2 documentation.
+>
+> For v0.1 code, see the [`v0.1` branch](https://github.com/epam/TimeBase-MCP/tree/v0.1).
+
 ## Prerequisites
 
 - Python `>=3.10`
