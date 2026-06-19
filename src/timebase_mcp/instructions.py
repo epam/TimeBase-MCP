@@ -1,8 +1,9 @@
 """MCP server instructions exposed to clients on initialize."""
 
 SERVER_INSTRUCTIONS = """\
-TimeBase MCP connects to the TimeBase instance configured via TIMEBASE_URL and related
-auth environment variables.
+TimeBase MCP connects to configured TimeBase instances. Use list_timebase_instances
+when choosing between configured instances; pass the chosen name as the optional
+instance_key argument for each TB operation. In single-instance setups, omit it.
 
 Before querying: discover streams, read schema, then check time range and symbols.
 Sample messages only when you need raw examples.

@@ -1,13 +1,21 @@
-from mcp.server.fastmcp import FastMCP
+from typing import Annotated
+
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.session import ServerSession
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from timebase_mcp.config import MCPSettings
 from timebase_mcp.models import StreamInfo, StreamSchema, StreamSymbols, StreamTimeRange
-from timebase_mcp.operations import run_with_client
+from timebase_mcp.operations import run_with_context
+from timebase_mcp.runtime import TimeBaseRuntime
+
+InstanceName = Annotated[
+    str | None,
+    Field(description="TB instance key."),
+]
 
 
-def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
+def register_stream_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="list_streams",
@@ -18,8 +26,15 @@ def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             openWorldHint=True,
         ),
     )
-    def list_streams() -> list[StreamInfo]:
-        return run_with_client(settings, lambda client: client.list_streams())
+    async def list_streams(
+        ctx: Context[ServerSession, TimeBaseRuntime],
+        instance_key: InstanceName = None,
+    ) -> list[StreamInfo]:
+        return await run_with_context(
+            ctx,
+            lambda client: client.list_streams(),
+            instance_key=instance_key,
+        )
 
     @mcp.tool(
         name="get_stream_schema",
@@ -30,12 +45,15 @@ def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             openWorldHint=True,
         ),
     )
-    def get_stream_schema(
+    async def get_stream_schema(
+        ctx: Context[ServerSession, TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
+        instance_key: InstanceName = None,
     ) -> StreamSchema:
-        return run_with_client(
-            settings,
+        return await run_with_context(
+            ctx,
             lambda client: client.get_stream_schema(stream_key),
+            instance_key=instance_key,
         )
 
     @mcp.tool(
@@ -47,12 +65,15 @@ def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             openWorldHint=True,
         ),
     )
-    def get_stream_time_range(
+    async def get_stream_time_range(
+        ctx: Context[ServerSession, TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
+        instance_key: InstanceName = None,
     ) -> StreamTimeRange:
-        return run_with_client(
-            settings,
+        return await run_with_context(
+            ctx,
             lambda client: client.get_stream_time_range(stream_key),
+            instance_key=instance_key,
         )
 
     @mcp.tool(
@@ -64,8 +85,10 @@ def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             openWorldHint=True,
         ),
     )
-    def get_stream_symbols(
+    async def get_stream_symbols(
+        ctx: Context[ServerSession, TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
+        instance_key: InstanceName = None,
         limit: int = Field(
             default=100,
             ge=1,
@@ -79,13 +102,14 @@ def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             ),
         ),
     ) -> StreamSymbols:
-        return run_with_client(
-            settings,
+        return await run_with_context(
+            ctx,
             lambda client: client.get_stream_symbols(
                 stream_key=stream_key,
                 limit=limit,
                 cursor=cursor,
             ),
+            instance_key=instance_key,
         )
 
     @mcp.tool(
@@ -97,7 +121,9 @@ def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             openWorldHint=True,
         ),
     )
-    def get_stream_messages(
+    async def get_stream_messages(
+        ctx: Context[ServerSession, TimeBaseRuntime],
+        instance_key: InstanceName = None,
         stream_key: str = Field(description="Stream key to inspect"),
         reverse: bool = Field(
             default=False,
@@ -110,9 +136,10 @@ def register_stream_tools(mcp: FastMCP, settings: MCPSettings) -> None:
             description="Number of messages to retrieve",
         ),
     ) -> str:
-        return run_with_client(
-            settings,
+        return await run_with_context(
+            ctx,
             lambda client: client.get_stream_messages_text(stream_key, reverse, count),
+            instance_key=instance_key,
         )
 
     _ = (

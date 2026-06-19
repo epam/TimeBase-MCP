@@ -9,7 +9,6 @@ from typing import Any, Literal
 import json
 import re
 
-from timebase_mcp.config import MCPSettings
 from timebase_mcp.errors import InvalidStreamTimeRangeError
 from timebase_mcp.models import (
     CompileQQLResult,
@@ -19,6 +18,7 @@ from timebase_mcp.models import (
     StreamSymbols,
     StreamTimeRange,
 )
+from timebase_mcp.instance import TimeBaseInstanceConfig
 
 
 class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
@@ -26,9 +26,14 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
     _MAX_STREAM_SYMBOLS_PAGE_SIZE = 500
     _ERROR_CONTEXT_CHARS = 40
 
-    def __init__(self, settings: MCPSettings, *, read_only: bool = True) -> None:
+    def __init__(
+        self,
+        config: TimeBaseInstanceConfig,
+        *,
+        read_only: bool = False,
+    ) -> None:
         self._read_only = read_only
-        self._settings = settings
+        self._config = config
 
     def __enter__(self) -> "TimeBaseClient":
         self.open()
@@ -50,6 +55,10 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
     @abstractmethod
     def close(self) -> None:
         """Closes the TimeBase connection."""
+
+    def interrupt(self) -> None:
+        """Interruption of an in-flight operation."""
+        self.close()
 
     @abstractmethod
     def _require_db(self) -> Any:

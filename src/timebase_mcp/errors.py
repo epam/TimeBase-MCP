@@ -10,6 +10,22 @@ class TimeBaseConnectionError(TimeBaseMCPError):
     """Raised when the server cannot connect to TimeBase."""
 
 
+class TimeBaseOperationError(TimeBaseMCPError):
+    """Raised when a TimeBase operation fails during execution."""
+
+
+class TimeBaseOperationTimeoutError(TimeBaseOperationError):
+    """Raised when a TimeBase operation exceeds the configured timeout."""
+
+
+class TimeBaseOperationLimitError(TimeBaseOperationError):
+    """Raised when the server rejects a TimeBase operation due to admission limits."""
+
+
+class TimeBaseOperationStateError(TimeBaseOperationError):
+    """Raised when runtime lifecycle state prevents an operation from proceeding."""
+
+
 class StreamNotFoundError(TimeBaseMCPError):
     """Raised when a requested stream does not exist."""
 

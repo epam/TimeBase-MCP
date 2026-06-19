@@ -5,11 +5,13 @@ from urllib import error, parse
 
 import pytest
 
-from timebase_mcp.oauth2 import (
+from timebase_mcp.auth.oauth2 import (
     OAuth2ClientCredentialsConfig,
     OAuth2ClientCredentialsProvider,
+    UrlLibTokenEndpointClient,
     get_oauth2_access_token,
     get_oauth2_provider,
+    parse_token_response,
 )
 
 
@@ -283,3 +285,44 @@ def test_oauth2_provider_raises_for_invalid_expires_in() -> None:
 
     with pytest.raises(ValueError, match="non-numeric expires_in"):
         provider.get_access_token()
+
+
+def test_shared_token_parser_returns_refresh_token_and_expiry() -> None:
+    parsed = parse_token_response(
+        {"access_token": "token-1", "refresh_token": "refresh-1", "expires_in": 120},
+        monotonic=Clock(100.0),
+        access_token_error="missing token",
+    )
+
+    assert parsed.access_token == "token-1"
+    assert parsed.refresh_token == "refresh-1"
+    assert parsed.expires_at_monotonic == 220.0
+
+
+def test_token_endpoint_client_posts_form_with_content_type() -> None:
+    captured_request: dict[str, object] = {}
+
+    def fake_urlopen(request_obj, timeout: int):
+        captured_request["headers"] = {
+            key.lower(): value for key, value in request_obj.header_items()
+        }
+        captured_request["body"] = request_obj.data.decode("utf-8")
+        captured_request["timeout"] = timeout
+        return DummyResponse({"access_token": "token-1"})
+
+    client = UrlLibTokenEndpointClient(urlopen=fake_urlopen)
+    payload = client.post_form(
+        "https://idp.example/token",
+        {"grant_type": "refresh_token", "refresh_token": "refresh-1"},
+    )
+
+    assert payload == {"access_token": "token-1"}
+    assert captured_request["headers"] == {
+        "accept": "application/json",
+        "content-type": "application/x-www-form-urlencoded",
+    }
+    assert captured_request["timeout"] == 30
+    assert parse.parse_qs(str(captured_request["body"])) == {
+        "grant_type": ["refresh_token"],
+        "refresh_token": ["refresh-1"],
+    }

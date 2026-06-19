@@ -11,6 +11,7 @@ from urllib.request import urlopen
 from timebase_mcp.clients.factory import create_timebase_client, get_detected_edition
 from timebase_mcp.config import Edition
 from timebase_mcp.config import MCPSettings
+from timebase_mcp.runtime import build_runtime
 
 
 INTEGRATION_STREAM_KEY = "mcp_integration_bars"
@@ -194,15 +195,15 @@ def _execute_ddl(db: Any, query: str) -> None:
 
 
 def _resolve_integration_edition(settings: MCPSettings) -> Edition:
-    detected_edition = get_detected_edition(settings)
+    runtime = build_runtime(settings)
+    instance = runtime.default_instance
+    detected_edition = get_detected_edition(instance)
     if detected_edition is not None:
         return detected_edition
 
-    client = create_timebase_client(settings)
+    client = create_timebase_client(instance)
     try:
-        if settings.detected_edition is None:
-            client.open()
-        detected_edition = settings.detected_edition
+        detected_edition = instance.resolved_edition
     finally:
         client.close()
 

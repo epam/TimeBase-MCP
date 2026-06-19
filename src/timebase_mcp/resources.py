@@ -1,11 +1,13 @@
 from mcp.server.fastmcp import FastMCP
 
-from timebase_mcp.config import MCPSettings
-from timebase_mcp.operations import run_with_client
+from timebase_mcp.operations import run_with_context
 
 
-def register_resources(mcp: FastMCP, settings: MCPSettings) -> None:
+def register_resources(mcp: FastMCP) -> None:
     """Register stable TimeBase metadata resources."""
+
+    async def _run_resource_operation(operation):
+        return await run_with_context(mcp.get_context(), operation)
 
     @mcp.resource(
         "timebase://streams",
@@ -14,8 +16,8 @@ def register_resources(mcp: FastMCP, settings: MCPSettings) -> None:
         description="Resource listing streams and descriptions.",
         mime_type="text/plain",
     )
-    def stream_catalog_resource() -> str:
-        streams = run_with_client(settings, lambda client: client.list_streams())
+    async def stream_catalog_resource() -> str:
+        streams = await _run_resource_operation(lambda client: client.list_streams())
         if not streams:
             return "No streams found."
         return "\n".join(
@@ -30,9 +32,8 @@ def register_resources(mcp: FastMCP, settings: MCPSettings) -> None:
         description="Resource exposing a stream schema by key.",
         mime_type="text/plain",
     )
-    def stream_schema_resource(stream_key: str) -> str:
-        schema = run_with_client(
-            settings,
+    async def stream_schema_resource(stream_key: str) -> str:
+        schema = await _run_resource_operation(
             lambda client: client.get_stream_schema(stream_key),
         )
         return schema.schema_text

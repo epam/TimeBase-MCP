@@ -5,8 +5,13 @@ from pydantic import SecretStr
 
 from timebase_mcp.clients import factory
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.config import Edition, MCPSettings
+from timebase_mcp.config import Edition
 from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
+from timebase_mcp.instance import (
+    DEFAULT_INSTANCE_KEY,
+    TimeBaseInstanceConfig,
+    TimeBaseInstanceRuntime,
+)
 
 ClientOutcome = str | Exception
 
@@ -14,6 +19,7 @@ ClientOutcome = str | Exception
 @dataclass
 class ClientState:
     opened_editions: list[Edition] = field(default_factory=list)
+    read_only_attempts: list[tuple[Edition, bool]] = field(default_factory=list)
     outcomes: dict[Edition, ClientOutcome] = field(
         default_factory=lambda: {
             "enterprise": "enterprise-db",
@@ -27,14 +33,15 @@ class StubTimeBaseClient(TimeBaseClient):
 
     def __init__(
         self,
-        settings: MCPSettings,
+        settings: TimeBaseInstanceConfig,
         *,
         state: ClientState,
         edition: Edition,
-        read_only: bool = True,
+        read_only: bool = False,
     ) -> None:
         super().__init__(settings, read_only=read_only)
         self.edition = edition
+        self.read_only = read_only
         self._state = state
         self._is_open = False
 
@@ -85,20 +92,33 @@ class StubTimeBaseClient(TimeBaseClient):
 
 @dataclass
 class FactoryHarness:
-    settings: MCPSettings
+    instance: TimeBaseInstanceRuntime
     client_state: ClientState
 
 
-def build_settings() -> MCPSettings:
-    return MCPSettings()
+def build_instance_config() -> TimeBaseInstanceConfig:
+    return TimeBaseInstanceConfig(tb_url="dxtick://localhost:8011")
 
 
-def build_oauth2_settings() -> MCPSettings:
-    return MCPSettings(
+def build_oauth2_instance_config() -> TimeBaseInstanceConfig:
+    return TimeBaseInstanceConfig(
+        tb_url="dxtick://localhost:8011",
         tb_username="service-user",
         tb_oauth2_token_url="https://idp.example/token",
         tb_oauth2_client_id="client-id",
         tb_oauth2_client_secret=SecretStr("client-secret"),
+    )
+
+
+def build_instance_runtime(
+    *,
+    config: TimeBaseInstanceConfig | None = None,
+    resolved_edition: Edition | None = None,
+) -> TimeBaseInstanceRuntime:
+    return TimeBaseInstanceRuntime(
+        key=DEFAULT_INSTANCE_KEY,
+        config=config or build_instance_config(),
+        resolved_edition=resolved_edition,
     )
 
 
@@ -114,13 +134,14 @@ def patch_create_client(
     client_state: ClientState,
 ) -> None:
     def fake_create_client(
-        settings: MCPSettings,
+        config: TimeBaseInstanceConfig,
         edition: Edition,
         *,
         read_only: bool,
     ) -> StubTimeBaseClient:
+        client_state.read_only_attempts.append((edition, read_only))
         return StubTimeBaseClient(
-            settings,
+            config,
             state=client_state,
             edition=edition,
             read_only=read_only,
@@ -136,9 +157,7 @@ def build_harness(
     detected_edition: Edition | None = None,
     outcomes: dict[Edition, ClientOutcome] | None = None,
 ) -> FactoryHarness:
-    settings = build_settings()
-    if detected_edition is not None:
-        settings.set_detected_edition(detected_edition)
+    instance = build_instance_runtime(resolved_edition=detected_edition)
 
     client_state = ClientState()
     if outcomes is not None:
@@ -146,17 +165,16 @@ def build_harness(
 
     patch_available_editions(monkeypatch, *available_editions)
     patch_create_client(monkeypatch, client_state)
-    return FactoryHarness(settings, client_state)
+    return FactoryHarness(instance, client_state)
 
 
 def test_create_timebase_client_raises_when_no_clients_are_installed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = build_settings()
     patch_available_editions(monkeypatch)
 
     with pytest.raises(ConfigurationError, match="No compatible TimeBase client"):
-        factory.create_timebase_client(settings)
+        factory.create_timebase_client(build_instance_runtime())
 
 
 def test_create_timebase_client_reports_incompatible_installed_client(
@@ -173,7 +191,7 @@ def test_create_timebase_client_reports_incompatible_installed_client(
         ConfigurationError,
         match=r"Community edition requires dxapi-ce===6\.2\.3; found dxapi-ce 6\.2\.1",
     ):
-        factory.create_timebase_client(build_settings())
+        factory.create_timebase_client(build_instance_runtime())
 
 
 def test_create_timebase_client_reports_all_incompatible_installed_clients(
@@ -182,17 +200,20 @@ def test_create_timebase_client_reports_all_incompatible_installed_clients(
     patch_dependency_metadata(
         monkeypatch,
         requirements=[
-            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ee===5.5.74 ; extra == 'enterprise'",
             "dxapi-ce===6.2.3 ; extra == 'community'",
         ],
-        versions={"dxapi": "5.5.72", "dxapi-ce": "6.2.1"},
+        versions={"dxapi-ee": "5.5.72", "dxapi-ce": "6.2.1"},
     )
 
     with pytest.raises(ConfigurationError) as exc_info:
-        factory.create_timebase_client(build_settings())
+        factory.create_timebase_client(build_instance_runtime())
 
     message = str(exc_info.value)
-    assert "Enterprise edition requires dxapi===5.5.73; found dxapi 5.5.72" in message
+    assert (
+        "Enterprise edition requires dxapi-ee===5.5.74; found dxapi-ee 5.5.72"
+        in message
+    )
     assert (
         "Community edition requires dxapi-ce===6.2.3; found dxapi-ce 6.2.1" in message
     )
@@ -205,21 +226,21 @@ def test_create_timebase_client_warns_about_ignored_incompatible_client(
     patch_dependency_metadata(
         monkeypatch,
         requirements=[
-            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ee===5.5.74 ; extra == 'enterprise'",
             "dxapi-ce===6.2.3 ; extra == 'community'",
         ],
-        versions={"dxapi": "5.5.72", "dxapi-ce": "6.2.3"},
+        versions={"dxapi-ee": "5.5.72", "dxapi-ce": "6.2.3"},
     )
     client_state = ClientState()
     patch_create_client(monkeypatch, client_state)
 
     with caplog.at_level("WARNING"):
-        client = factory.create_timebase_client(build_settings())
+        client = factory.create_timebase_client(build_instance_runtime())
 
     assert isinstance(client, StubTimeBaseClient)
     assert client.edition == "community"
     assert "Ignoring incompatible enterprise TimeBase client" in caplog.text
-    assert "found dxapi 5.5.72" in caplog.text
+    assert "found dxapi-ee 5.5.72" in caplog.text
 
 
 def test_create_timebase_client_reports_incompatible_required_fallback(
@@ -228,10 +249,10 @@ def test_create_timebase_client_reports_incompatible_required_fallback(
     patch_dependency_metadata(
         monkeypatch,
         requirements=[
-            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ee===5.5.74 ; extra == 'enterprise'",
             "dxapi-ce===6.2.3 ; extra == 'community'",
         ],
-        versions={"dxapi": "5.5.73", "dxapi-ce": "6.2.1"},
+        versions={"dxapi-ee": "5.5.73", "dxapi-ce": "6.2.1"},
     )
     client_state = ClientState(
         outcomes={
@@ -244,7 +265,7 @@ def test_create_timebase_client_reports_incompatible_required_fallback(
         ConfigurationError,
         match=r"Community edition requires dxapi-ce===6\.2\.3; found dxapi-ce 6\.2\.1",
     ):
-        factory.create_timebase_client(build_settings())
+        factory.create_timebase_client(build_instance_runtime())
 
 
 def test_create_timebase_client_prefers_enterprise_when_both_clients_connect(
@@ -255,18 +276,20 @@ def test_create_timebase_client_prefers_enterprise_when_both_clients_connect(
         available_editions=("enterprise", "community"),
     )
 
-    client = factory.create_timebase_client(harness.settings)
+    client = factory.create_timebase_client(harness.instance)
 
     assert isinstance(client, StubTimeBaseClient)
     assert client.edition == "enterprise"
+    assert client.read_only is False
     assert harness.client_state.opened_editions == ["enterprise"]
-    assert harness.settings.detected_edition == "enterprise"
+    assert harness.client_state.read_only_attempts == [("enterprise", False)]
+    assert harness.instance.resolved_edition == "enterprise"
 
 
 def test_get_detected_edition_returns_enterprise_for_oauth2_configuration() -> None:
-    settings = build_oauth2_settings()
+    instance = build_instance_runtime(config=build_oauth2_instance_config())
 
-    assert factory.get_detected_edition(settings) == "enterprise"
+    assert factory.get_detected_edition(instance) == "enterprise"
 
 
 @pytest.mark.parametrize(
@@ -292,12 +315,17 @@ def test_create_timebase_client_falls_back_on_known_protocol_mismatch(
         outcomes={"enterprise": TimeBaseConnectionError(message)},
     )
 
-    client = factory.create_timebase_client(harness.settings)
+    client = factory.create_timebase_client(harness.instance)
 
     assert isinstance(client, StubTimeBaseClient)
     assert client.edition == "community"
+    assert client.read_only is False
     assert harness.client_state.opened_editions == ["enterprise", "community"]
-    assert harness.settings.detected_edition == "community"
+    assert harness.client_state.read_only_attempts == [
+        ("enterprise", False),
+        ("community", False),
+    ]
+    assert harness.instance.resolved_edition == "community"
 
 
 @pytest.mark.parametrize(
@@ -324,9 +352,10 @@ def test_create_timebase_client_raises_missing_dependency_for_alternate_edition(
     )
 
     with pytest.raises(ConfigurationError, match=r"Install timebase-mcp\[community\]"):
-        factory.create_timebase_client(harness.settings)
+        factory.create_timebase_client(harness.instance)
 
     assert harness.client_state.opened_editions == ["enterprise"]
+    assert harness.client_state.read_only_attempts == [("enterprise", False)]
 
 
 def test_create_timebase_client_does_not_fallback_on_generic_connection_error(
@@ -343,9 +372,10 @@ def test_create_timebase_client_does_not_fallback_on_generic_connection_error(
     )
 
     with pytest.raises(TimeBaseConnectionError, match="connection refused"):
-        factory.create_timebase_client(harness.settings)
+        factory.create_timebase_client(harness.instance)
 
     assert harness.client_state.opened_editions == ["enterprise"]
+    assert harness.client_state.read_only_attempts == [("enterprise", False)]
 
 
 @pytest.mark.parametrize(
@@ -365,12 +395,10 @@ def test_get_detected_edition(
     available_editions: tuple[Edition, ...],
     expected: Edition | None,
 ) -> None:
-    settings = build_settings()
     patch_available_editions(monkeypatch, *available_editions)
-    if detected_edition is not None:
-        settings.set_detected_edition(detected_edition)
+    instance = build_instance_runtime(resolved_edition=detected_edition)
 
-    assert factory.get_detected_edition(settings) == expected
+    assert factory.get_detected_edition(instance) == expected
 
 
 def test_create_timebase_client_uses_cached_detected_edition(
@@ -382,16 +410,13 @@ def test_create_timebase_client_uses_cached_detected_edition(
         detected_edition="community",
     )
 
-    client = factory.create_timebase_client(harness.settings)
+    client = factory.create_timebase_client(harness.instance)
 
     assert isinstance(client, StubTimeBaseClient)
     assert client.edition == "community"
-    assert harness.client_state.opened_editions == []
-
-    with client as opened_client:
-        assert opened_client is client
-
+    assert client.read_only is False
     assert harness.client_state.opened_editions == ["community"]
+    assert harness.client_state.read_only_attempts == [("community", False)]
 
 
 def patch_dependency_metadata(
@@ -419,8 +444,8 @@ def test_dependency_status_allows_matching_enterprise_version(
 ) -> None:
     patch_dependency_metadata(
         monkeypatch,
-        requirements=["dxapi===5.5.73 ; extra == 'enterprise'"],
-        versions={"dxapi": "5.5.73"},
+        requirements=["dxapi-ee===5.5.74 ; extra == 'enterprise'"],
+        versions={"dxapi-ee": "5.5.74"},
     )
 
     status = factory._dependency_status("enterprise")
@@ -433,15 +458,15 @@ def test_dependency_status_rejects_old_enterprise_version(
 ) -> None:
     patch_dependency_metadata(
         monkeypatch,
-        requirements=["dxapi===5.5.73 ; extra == 'enterprise'"],
-        versions={"dxapi": "5.5.72"},
+        requirements=["dxapi-ee===5.5.74 ; extra == 'enterprise'"],
+        versions={"dxapi-ee": "5.5.72"},
     )
 
     status = factory._dependency_status("enterprise")
 
     assert status.error is not None
-    assert "dxapi===5.5.73" in str(status.error)
-    assert "found dxapi 5.5.72" in str(status.error)
+    assert "dxapi-ee===5.5.74" in str(status.error)
+    assert "found dxapi-ee 5.5.72" in str(status.error)
     assert "timebase-mcp[enterprise]" in str(status.error)
 
 
@@ -508,10 +533,10 @@ def test_available_editions_excludes_incompatible_versions(
     patch_dependency_metadata(
         monkeypatch,
         requirements=[
-            "dxapi===5.5.73 ; extra == 'enterprise'",
+            "dxapi-ee===5.5.74 ; extra == 'enterprise'",
             "dxapi-ce===6.2.3 ; extra == 'community'",
         ],
-        versions={"dxapi": "5.5.72", "dxapi-ce": "6.2.3"},
+        versions={"dxapi-ee": "5.5.72", "dxapi-ce": "6.2.3"},
     )
 
     assert factory._available_editions() == ("community",)
@@ -535,7 +560,7 @@ def test_create_client_for_edition_validates_before_loading_client_class(
 
     with pytest.raises(ConfigurationError, match="incompatible dependency"):
         factory._create_client_for_edition(
-            build_settings(),
+            build_instance_config(),
             "enterprise",
             read_only=True,
         )

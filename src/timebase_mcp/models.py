@@ -8,6 +8,19 @@ class MCPServerConfiguration(BaseModel):
     tb_url: str
     tb_username: str | None = None
     edition: str | None = None
+    inbound_auth_enabled: bool = False
+    outbound_auth_mode: str = "none"
+    principal: str | None = None
+    tb_http_urls: list[str] = Field(default_factory=list)
+    oauth_redirect_uri: str | None = None
+    dxapi_ssl_termination: bool = False
+    dxapi_ssl_trust_all: bool = False
+
+
+class TimeBaseInstanceInfo(BaseModel):
+    name: str = Field(description="Name to pass as the instance_key argument to tools.")
+    description: str | None = None
+    is_default: bool = False
 
 
 class StreamInfo(BaseModel):
