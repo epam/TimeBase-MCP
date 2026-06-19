@@ -229,44 +229,19 @@ wheels = [
 ]
 
 [[package]]
-name = "dxapi"
-version = "5.5.73"
-source = { registry = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/simple" }
-wheels = [
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py2.py3-none-any.whl", hash = "sha256:42ba6fc9f6bf7b3aa66c1a591594aa21571627280bea2d6bc15f7e3b341b488b" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py310-none-macosx_10_9_x86_64.whl", hash = "sha256:64a48be27bc89fae0cc4c4bdb720e447e30ad374b46caefe77b29b8b9b25faff" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py310-none-macosx_11_0_arm64.whl", hash = "sha256:f6f8849b6476f58f26549f1b4d6e5f814626552bc9a0ff6829d93c1f462b3325" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py310-none-manylinux_2_25_aarch64.whl", hash = "sha256:fbcd24c70ca8efdab8cf6db571166b32eadcb08bfcae463b03438214abbe6e69" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py310-none-manylinux_2_25_x86_64.whl", hash = "sha256:43a3bdab578b4ef8552ee62b2b5b59eb7e65401779dd0ae8f5eabb8b735f7dbf" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py310-none-win_amd64.whl", hash = "sha256:686bb113cff09786303632d09e66b79f88d80c09e84ccbe0d628ffc612fb7f79" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py311-none-macosx_10_9_x86_64.whl", hash = "sha256:6233cdeaaa47e0d8ba059f1e7ac1aeb7693b2b381cc99e680005e9ad2be52b0c" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py311-none-macosx_11_0_arm64.whl", hash = "sha256:de504d830dd9d3239a0f3d05f4e4c1eb2a66f97911c01f6becdfe036fafddabc" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py311-none-manylinux_2_25_aarch64.whl", hash = "sha256:996d9b889a98e28473c5a144e687681a7eac07c9bf1cbc95a49aed70f041c88d" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py311-none-manylinux_2_25_x86_64.whl", hash = "sha256:755688db5287583efc70fa3e6402c61ee4060df994e1945ce6c68499957c4065" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py311-none-win_amd64.whl", hash = "sha256:827e133f9360a45428eff464c27e3ed430387f4a4cc5380d2944ed201abd6b1b" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py312-none-macosx_10_9_x86_64.whl", hash = "sha256:a7743d80a14862b10cd8c273a1c6441c3d52ba2012e644cfe153e275e9f76d7b" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py312-none-macosx_11_0_arm64.whl", hash = "sha256:c24aab766d965badd813368a217e2c4a21485b69ecd26875d6a6c363a2f4b530" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py312-none-manylinux_2_25_aarch64.whl", hash = "sha256:518fc23e8beb7290c46bd57709283c51e422f26069e1092f4376ba5db0299c6d" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py312-none-manylinux_2_25_x86_64.whl", hash = "sha256:3d7326f0277414158caadc7a41574866dd13ed230e0e72c536991c56cecad36e" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py312-none-win_amd64.whl", hash = "sha256:833afbbf4357cbb791e4f8e41fba5f2cbb86cec3c4962fd4166e3469bf82f42e" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py313-none-macosx_10_9_x86_64.whl", hash = "sha256:4d04da86b91c88abccfc744dbfafebbe18247e890dc36e05076e5cf94e132bae" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py313-none-macosx_11_0_arm64.whl", hash = "sha256:a409344d28366b9dbfed1f5070d6ccbfcaff1f8e2bd480cc6f3c9c173e119752" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py313-none-manylinux_2_25_aarch64.whl", hash = "sha256:34d8747c4f8be919923739312f0459a9f7a2ed72eb6954c0d6b334a3d69e67dc" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py313-none-manylinux_2_25_x86_64.whl", hash = "sha256:1f4706bfdcdd2a8b84774b396d8c2e5fc797d763fd9602bcf4b9732745596c44" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py313-none-win_amd64.whl", hash = "sha256:4f9be3bbe2801920d85df070d8added19d1f80d4c90fe7608339c588bde873ac" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py314-none-macosx_10_9_x86_64.whl", hash = "sha256:1857662a9a88c5e7966dce1127aa8f5f546d698459609424fc266e23a2414a4e" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py314-none-macosx_11_0_arm64.whl", hash = "sha256:d5236ca7e205d6d6aaeb50c68a41909ed5166d967604982d72e51607cbcad265" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py314-none-manylinux_2_25_aarch64.whl", hash = "sha256:91568a5307a0b39a842df31c47b5000eaf45bef159db47cde01856f5057d888c" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py314-none-manylinux_2_25_x86_64.whl", hash = "sha256:e350fbae2745439a5135a146d752604b7e7b493f7448164964a73eaa927e9db1" },
-    { url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/packages/dxapi/5.5.73/dxapi-5.5.73-py314-none-win_amd64.whl", hash = "sha256:596d63b4518710f4ff952b26e53b371a287675b10a0aec02ea2262879adcae28" },
-]
-
-[[package]]
 name = "dxapi-ce"
 version = "6.2.3"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/91/ac/f24a3b091a4166ff29d6b85594e21cf864ee097c9eedd110cae674de8b89/dxapi_ce-6.2.3-py2.py3-none-any.whl", hash = "sha256:f3d9ce3282f2584f85ede57116d60299da8ffca9a87078ad393a6b6a22a57f53", size = 95181829, upload-time = "2026-06-08T09:10:23.591Z" },
+]
+
+[[package]]
+name = "dxapi-ee"
+version = "5.5.74"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/64/0f3bc9d646a062bbc77d10346b5bac2f59e45fdb840ca01acdebc0387337/dxapi_ee-5.5.74-py2.py3-none-any.whl", hash = "sha256:6c1f9d887281449f035e5d7e2287629ae98b8bdb523f6a32e7632973081e3513", size = 95248401, upload-time = "2026-06-17T11:34:55.192Z" },
 ]
 
 [[package]]
@@ -1049,14 +1024,14 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "dxapi" },
     { name = "dxapi-ce" },
+    { name = "dxapi-ee" },
 ]
 community = [
     { name = "dxapi-ce" },
 ]
 enterprise = [
-    { name = "dxapi" },
+    { name = "dxapi-ee" },
 ]
 
 [package.dev-dependencies]
@@ -1068,10 +1043,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dxapi", marker = "extra == 'all'", specifier = "===5.5.73", index = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/simple" },
-    { name = "dxapi", marker = "extra == 'enterprise'", specifier = "===5.5.73", index = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/simple" },
     { name = "dxapi-ce", marker = "extra == 'all'", specifier = "===6.2.3" },
     { name = "dxapi-ce", marker = "extra == 'community'", specifier = "===6.2.3" },
+    { name = "dxapi-ee", marker = "extra == 'all'", specifier = "===5.5.74" },
+    { name = "dxapi-ee", marker = "extra == 'enterprise'", specifier = "===5.5.74" },
     { name = "httpx", specifier = ">=0.28.1,<1.0.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.28.0,<1.29.0" },
     { name = "packaging", specifier = ">=26.0,<27.0" },
