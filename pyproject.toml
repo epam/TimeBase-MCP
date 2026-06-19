@@ -53,20 +53,12 @@ community = [
     "dxapi-ce===6.2.3",
 ]
 enterprise = [
-    "dxapi===5.5.73",
+    "dxapi-ee===5.5.74",
 ]
 all = [
-    "dxapi===5.5.73",
+    "dxapi-ee===5.5.74",
     "dxapi-ce===6.2.3",
 ]
-
-[[tool.uv.index]]
-name = "nexus"
-url = "https://nexus.deltixhub.com/repository/epm-rtc-public-python/simple"
-authenticate = "always"
-
-[tool.uv.sources]
-dxapi = { index = "nexus" }
 
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12"]

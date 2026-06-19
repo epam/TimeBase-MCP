@@ -43,7 +43,7 @@ _EDITION_INFO: dict[Edition, _EditionInfo] = {
     "enterprise": _EditionInfo(
         label="Enterprise",
         module_name="dxapi",
-        distribution_name="dxapi",
+        distribution_name="dxapi-ee",
         extra_name="timebase-mcp[enterprise]",
         client_module="timebase_mcp.clients.enterprise",
         client_class="EnterpriseTimeBaseClient",
