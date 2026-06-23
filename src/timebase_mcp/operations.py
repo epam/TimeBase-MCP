@@ -55,14 +55,19 @@ async def run_with_runtime(
     instance_key: str | None = None,
 ) -> ResultT:
     """Run a TimeBase operation against a resolved runtime instance."""
-    instance = runtime.get_instance(instance_key)
-    principal_key, pool = _resolve_pool(instance)
+    try:
+        instance = runtime.get_instance(instance_key)
+    except ValueError as exc:
+        raise TimeBaseOperationError(str(exc)) from exc
+
     timeout_seconds = runtime.server_settings.operation_timeout_seconds
+    principal_key = SHARED_PRINCIPAL_KEY
     lease = None
     operation_future = None
     release_lease_in_background = False
 
     try:
+        principal_key, pool = _resolve_pool(instance)
         lease = await pool.acquire()
         operation_future = asyncio.get_running_loop().run_in_executor(
             None,

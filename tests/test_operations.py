@@ -178,6 +178,59 @@ async def test_run_with_runtime_uses_selected_instance(
 
 
 @pytest.mark.anyio
+async def test_run_with_runtime_requires_instance_key_when_multiple_instances() -> None:
+    runtime = build_runtime(
+        MCPSettings.model_validate(
+            {
+                "servers": [
+                    {"name": "prod", "url": "dxtick://prod:8011"},
+                    {"name": "dev", "url": "dxtick://dev:8011"},
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(
+        TimeBaseOperationError,
+        match="instance_key is required when multiple TimeBase instances are configured",
+    ):
+        await run_with_runtime(runtime, lambda client: id(client))
+
+
+@pytest.mark.anyio
+async def test_run_with_runtime_uses_only_instance_when_key_is_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_clients: list[StubClient] = []
+
+    def build_client(instance, *, read_only: bool = False) -> StubClient:
+        _assert_writable_open_requested(read_only)
+        client = StubClient(key=instance.key, read_only=read_only)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(
+        MCPSettings.model_validate(
+            {"servers": [{"name": "prod", "url": "dxtick://prod:8011"}]}
+        )
+    )
+
+    selected_key = await run_with_runtime(
+        runtime,
+        lambda client: cast(StubClient, client).key,
+    )
+
+    assert selected_key == "prod"
+    assert [client.key for client in created_clients] == ["prod"]
+
+    await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
+
+
+@pytest.mark.anyio
 async def test_run_with_runtime_closes_broken_client_after_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

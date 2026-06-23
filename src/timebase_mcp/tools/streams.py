@@ -1,5 +1,3 @@
-from typing import Annotated
-
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 from mcp.types import ToolAnnotations
@@ -8,11 +6,7 @@ from pydantic import Field
 from timebase_mcp.models import StreamInfo, StreamSchema, StreamSymbols, StreamTimeRange
 from timebase_mcp.operations import run_with_context
 from timebase_mcp.runtime import TimeBaseRuntime
-
-InstanceName = Annotated[
-    str | None,
-    Field(description="TB instance key."),
-]
+from timebase_mcp.tools.common import InstanceName
 
 
 def register_stream_tools(mcp: FastMCP) -> None:

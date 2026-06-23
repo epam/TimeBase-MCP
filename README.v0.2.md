@@ -681,7 +681,7 @@ Cursor uses static OAuth, when DCR is unavailable: supply the client ID the IdP 
 
 #### Multi-server TimeBase configuration
 
-Connect one `timebase-mcp` process to multiple TimeBase servers. The server exposes `list_timebase_instances` tool; agents call it and pass the relevant instance key to the tool calls. When a tool omits the instance key, the first configured server is used.
+Connect one `timebase-mcp` process to multiple TimeBase servers. The server exposes `list_timebase_instances` tool; agents call it and pass the relevant instance key to the tool calls. When multiple instances are configured, omitting `instance_key` results in an error to avoid reading from the wrong TimeBase server.
 
 | Where you configure | How |
 | - | - |
@@ -771,6 +771,7 @@ There are two independent directions:
 | `get_stream_messages` | Preview first/last messages from a stream | `stream_key`, optional `instance_key`, `reverse`, `count` |
 | `execute_query` | Execute a TimeBase QQL query (limited preview) | `query`, optional `instance_key`, `limit` (1–100) |
 | `compile_query` | Compile a QQL query (parser-level diagnostics only) | `query`, optional `instance_key` |
+| `get_server_configuration` | Get MCP server runtime configuration and all configured TimeBase instances | None |
 
 ### Resources
 
@@ -778,8 +779,10 @@ Some clients (e.g. VS Code) let you add resources to the context explicitly.
 
 | URI | Name | Description |
 | - | - | - |
-| `timebase://streams` | `stream_catalog` | Text resource listing streams and descriptions |
-| `timebase://streams/{stream_key}/schema` | `stream_schema` | Resource template exposing a stream schema by key |
+| `timebase://streams` | `stream_catalog` | Text resource listing streams and descriptions for single-instance setups |
+| `timebase://streams/{stream_key}/schema` | `stream_schema` | Resource template exposing a stream schema by key for single-instance setups |
+| `timebase://instances/{instance_key}/streams` | `instance_stream_catalog` | Text resource listing streams and descriptions for one instance |
+| `timebase://instances/{instance_key}/streams/{stream_key}/schema` | `instance_stream_schema` | Resource template exposing a stream schema by instance and stream key |
 
 ---
 

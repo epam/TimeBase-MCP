@@ -3,24 +3,29 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-class MCPServerConfiguration(BaseModel):
-    transport: str
-    tb_url: str
-    tb_username: str | None = None
+class TimeBaseServerConfiguration(BaseModel):
+    name: str
+    description: str | None = None
+    url: str
+    username: str | None = None
     edition: str | None = None
-    inbound_auth_enabled: bool = False
     outbound_auth_mode: str = "none"
-    principal: str | None = None
-    tb_http_urls: list[str] = Field(default_factory=list)
-    oauth_redirect_uri: str | None = None
+    http_url: str | None = None
     dxapi_ssl_termination: bool = False
     dxapi_ssl_trust_all: bool = False
+
+
+class MCPServerConfiguration(BaseModel):
+    transport: str
+    inbound_auth_mode: str = "none"
+    principal: str | None = None
+    oauth_redirect_uri: str | None = None
+    timebase_instances: list[TimeBaseServerConfiguration] = Field(default_factory=list)
 
 
 class TimeBaseInstanceInfo(BaseModel):
     name: str = Field(description="Name to pass as the instance_key argument to tools.")
     description: str | None = None
-    is_default: bool = False
 
 
 class StreamInfo(BaseModel):
