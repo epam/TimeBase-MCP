@@ -851,6 +851,36 @@ Logs are printed to stderr of the `timebase-mcp` process, look for them in the t
 
 </details>
 
+### Windows setup issues
+
+- **`timebase-mcp` is not recognized / MCP client cannot find the command:** with `pip`, Windows may install console scripts into a Python `Scripts` directory that is not on your user `PATH` by default. Verify from a new PowerShell and, if needed, search the common Windows Python install roots:
+
+  ```powershell
+  timebase-mcp -v
+  Get-ChildItem -Path "$env:LOCALAPPDATA\Python", "$env:APPDATA\Python" -Filter timebase-mcp.exe -Recurse -ErrorAction SilentlyContinue
+  ```
+
+  If the first command fails, add the actual directory containing `timebase-mcp.exe` to your user `PATH` or use the absolute `.exe` path in your MCP client config. `uv` and `pipx` are usually easier on Windows because they manage command shims and `PATH` more predictably.
+
+  ```json
+  {
+    "mcpServers": {
+      "timebase-mcp": {
+        "type": "stdio",
+        "command": "C:\\Users\\<you>\\AppData\\Local\\Python\\pythoncore-3.14-64\\Scripts\\timebase-mcp.exe",
+        "args": [],
+        "env": {
+          "TIMEBASE_URL": "dxtick://localhost:8011"
+        }
+      }
+    }
+  }
+  ```
+
+- **Installed in WSL, client runs on Windows:** local `stdio` MCP runs in the same OS environment as the MCP client. If Cursor, VS Code, or Claude Desktop runs on Windows, it cannot launch a `timebase-mcp` command installed only inside WSL. Install `timebase-mcp` on Windows too, or run both the MCP client and `timebase-mcp` inside WSL / a remote environment.
+
+- **`localhost` points to the wrong place:** `localhost` is resolved from wherever the `timebase-mcp` process runs. If TimeBase runs inside WSL, Docker, or another VM, make sure the native and HTTP TimeBase ports are exposed to the Windows side and set `TIMEBASE_URL` to an address reachable from that environment.
+
 ### TimeBase connection issues
 
 - **Connection refused** (`Connection refused at SOCKET`): TimeBase isn't running or isn't reachable (wrong URL, firewall, WSL/network). Port layout depends on TimeBase version:
