@@ -1,10 +1,11 @@
+from typing import Literal
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from timebase_mcp.models import CompileQQLResult
+from timebase_mcp.models import CompileQQLResult, QQLFunctionsResult
 from timebase_mcp.operations import run_with_context
 from timebase_mcp.runtime import TimeBaseRuntime
 from timebase_mcp.tools.common import InstanceName
@@ -64,4 +65,36 @@ def register_query_tools(mcp: FastMCP) -> None:
             instance_key=instance_key,
         )
 
-    _ = (execute_query, compile_query)
+    @mcp.tool(
+        name="list_qql_functions",
+        description=(
+            "List QQL function signatures supported by the connected TimeBase server"
+        ),
+        annotations=ToolAnnotations(
+            title="List available TimeBase QQL function signatures",
+            readOnlyHint=True,
+            openWorldHint=True,
+        ),
+    )
+    async def list_qql_functions(
+        ctx: Context[ServerSession, TimeBaseRuntime],
+        instance_key: InstanceName = None,
+        kind: Literal["all", "stateless", "stateful"] = Field(
+            default="all",
+            description="Function category to return",
+        ),
+        function_id: str | None = Field(
+            default=None,
+            description=(
+                "Optional exact QQL function id to return, e.g. ABS or SMA. "
+                "When provided, TimeBase filters overloads server-side."
+            ),
+        ),
+    ) -> QQLFunctionsResult:
+        return await run_with_context(
+            ctx,
+            lambda client: client.list_qql_functions(kind, function_id),
+            instance_key=instance_key,
+        )
+
+    _ = (execute_query, compile_query, list_qql_functions)

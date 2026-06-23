@@ -20,6 +20,7 @@ from timebase_mcp.errors import (
     TimeBaseOperationTimeoutError,
 )
 from timebase_mcp.models import StreamInfo
+from timebase_mcp.runtime import build_runtime, build_server_configuration
 from timebase_mcp.server import create_server
 from timebase_mcp.tools import queries as query_tools
 from timebase_mcp.tools import streams as stream_tools
@@ -110,6 +111,7 @@ async def test_list_tools_resources_and_templates(
             "get_stream_messages",
             "execute_query",
             "compile_query",
+            "list_qql_functions",
         ]
     )
     assert {
@@ -151,6 +153,7 @@ async def test_list_tools_resources_and_templates(
             "get_stream_messages": {"readOnlyHint": True, "openWorldHint": True},
             "execute_query": {"readOnlyHint": False, "openWorldHint": True},
             "compile_query": {"readOnlyHint": True, "openWorldHint": True},
+            "list_qql_functions": {"readOnlyHint": True, "openWorldHint": True},
         }
     )
     assert "instance_key" not in tools_result.tools[1].inputSchema["properties"]
@@ -453,7 +456,7 @@ async def test_call_stream_tool_uses_selected_instance(
 
 
 @pytest.mark.anyio
-async def test_call_stream_tool_uses_default_instance_when_omitted(
+async def test_call_stream_tool_uses_single_instance_when_key_is_omitted(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
@@ -789,6 +792,74 @@ async def test_call_compile_query_tool_returns_compact_success_payload(
         "error_token": None,
         "error_context": None,
         "error_position": None,
+    }
+
+
+@pytest.mark.anyio
+async def test_call_list_qql_functions_tool_returns_structured_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[ClientSession],
+    ],
+) -> None:
+    selected_instances: list[str | None] = []
+    selected_kinds: list[str] = []
+    selected_function_ids: list[str | None] = []
+
+    async def run_list_qql_functions(_ctx, operation, *, instance_key=None):
+        selected_instances.append(instance_key)
+
+        class StubClient:
+            def list_qql_functions(self, kind: str, function_id: str | None = None):
+                selected_kinds.append(kind)
+                selected_function_ids.append(function_id)
+                return {
+                    "stateless": [
+                        {
+                            "id": "MAX",
+                            "signatures": [
+                                "MAX(x: INTEGER(INT64), y: INTEGER(INT64)) -> INTEGER(INT64)?"
+                            ],
+                            "overload_count": 1,
+                        }
+                    ],
+                    "stateful": [],
+                    "function_count": 1,
+                    "overload_count": 1,
+                }
+
+        return operation(StubClient())
+
+    monkeypatch.setattr(
+        query_tools,
+        "run_with_context",
+        run_list_qql_functions,
+    )
+
+    async with client_session_factory(None) as client_session:
+        result = await client_session.call_tool(
+            "list_qql_functions",
+            {"instance_key": "dev", "kind": "stateless", "function_id": "MAX"},
+        )
+
+    assert result.isError is False
+    assert selected_instances == ["dev"]
+    assert selected_kinds == ["stateless"]
+    assert selected_function_ids == ["MAX"]
+    assert result.structuredContent == {
+        "stateless": [
+            {
+                "id": "MAX",
+                "signatures": [
+                    "MAX(x: INTEGER(INT64), y: INTEGER(INT64)) -> INTEGER(INT64)?"
+                ],
+                "overload_count": 1,
+            }
+        ],
+        "stateful": [],
+        "function_count": 1,
+        "overload_count": 1,
     }
 
 
