@@ -52,6 +52,20 @@ class StreamTimeRange(BaseModel):
     end: datetime | None = None
 
 
+class StreamSpaces(BaseModel):
+    stream_key: str
+    spaces: list[str] = Field(default_factory=list)
+    returned_count: int = 0
+    supports_spaces: bool = True
+
+
+class StreamSpaceTimeRange(BaseModel):
+    stream_key: str
+    space: str
+    start: datetime | None = None
+    end: datetime | None = None
+
+
 class QQLErrorPosition(BaseModel):
     start_line: int
     start_column: int

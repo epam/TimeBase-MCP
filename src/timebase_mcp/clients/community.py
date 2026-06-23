@@ -140,17 +140,41 @@ class CommunityTimeBaseClient(TimeBaseClient):
     def _list_stream_symbols(self, stream: dxapi_ce_types.TickStream) -> list[str]:
         return list[str](stream.listSymbols())
 
+    def _get_stream_time_range_ms(
+        self,
+        stream: dxapi_ce_types.TickStream,
+    ) -> list[int] | None:
+        return stream.getTimeRange()
+
+    def _list_stream_spaces(
+        self, stream: dxapi_ce_types.TickStream
+    ) -> list[str] | None:
+        spaces = stream.listSpaces()
+        if spaces is None:
+            return None
+        return list[str](spaces)
+
+    def _get_stream_space_time_range_ms(
+        self,
+        stream: dxapi_ce_types.TickStream,
+        space: str,
+    ) -> list[int] | None:
+        return stream.getSpaceTimeRange(space)
+
     def _read_stream_messages(
         self,
         stream: dxapi_ce_types.TickStream,
         reverse: bool,
         count: int,
+        space: str | None,
     ) -> list[dict[str, Any]]:
         self._ensure_dxapi_ce()
         assert dxapi_ce is not None
         options = dxapi_ce.SelectionOptions()
         options.live = False
         options.reverse = reverse
+        if space is not None:
+            options.space = space
         timestamp = (
             dxapi_ce.JAVA_LONG_MAX_VALUE if reverse else dxapi_ce.JAVA_LONG_MIN_VALUE
         )

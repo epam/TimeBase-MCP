@@ -17,6 +17,8 @@ from timebase_mcp.models import (
     QQLFunctionsResult,
     StreamInfo,
     StreamSchema,
+    StreamSpaces,
+    StreamSpaceTimeRange,
     StreamSymbols,
     StreamTimeRange,
 )
@@ -84,11 +86,28 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
         """Returns stream symbols/entities."""
 
     @abstractmethod
+    def _get_stream_time_range_ms(self, stream: Any) -> Any:
+        """Returns the raw millisecond time range for a stream."""
+
+    @abstractmethod
+    def _list_stream_spaces(self, stream: Any) -> list[str] | None:
+        """Returns stream spaces, or None if the stream does not support spaces."""
+
+    @abstractmethod
+    def _get_stream_space_time_range_ms(
+        self,
+        stream: Any,
+        space: str,
+    ) -> Any:
+        """Returns the raw millisecond time range for a stream space."""
+
+    @abstractmethod
     def _read_stream_messages(
         self,
         stream: Any,
         reverse: bool,
         count: int,
+        space: str | None,
     ) -> list[dict[str, Any]]:
         """Read stream messages for preview output."""
 
@@ -160,24 +179,49 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
 
     def get_stream_time_range(self, stream_key: str) -> StreamTimeRange:
         stream = self.get_stream(stream_key)
-        time_range_ms = stream.getTimeRange()
-
-        if not time_range_ms:
-            return StreamTimeRange(stream_key=stream_key)
-
-        if len(time_range_ms) != 2:
-            raise InvalidStreamTimeRangeError(stream_key, time_range_ms)
-
-        start_timestamp_ms = time_range_ms[0]
-        end_timestamp_ms = time_range_ms[1]
-
-        if start_timestamp_ms > end_timestamp_ms:
-            raise InvalidStreamTimeRangeError(stream_key, time_range_ms)
+        start, end = self._parse_time_range_ms(
+            stream_key,
+            self._get_stream_time_range_ms(stream),
+        )
 
         return StreamTimeRange(
             stream_key=stream_key,
-            start=self._timestamp_ms_to_datetime_utc(start_timestamp_ms),
-            end=self._timestamp_ms_to_datetime_utc(end_timestamp_ms),
+            start=start,
+            end=end,
+        )
+
+    def get_stream_spaces(self, stream_key: str) -> StreamSpaces:
+        stream = self.get_stream(stream_key)
+        spaces = self._list_stream_spaces(stream)
+
+        if spaces is None:
+            return StreamSpaces(
+                stream_key=stream_key,
+                supports_spaces=False,
+            )
+
+        sorted_spaces = sorted(spaces)
+        return StreamSpaces(
+            stream_key=stream_key,
+            spaces=sorted_spaces,
+            returned_count=len(sorted_spaces),
+            supports_spaces=True,
+        )
+
+    def get_stream_space_time_range(
+        self,
+        stream_key: str,
+        space: str,
+    ) -> StreamSpaceTimeRange:
+        stream = self.get_stream(stream_key)
+        time_range_ms = self._get_stream_space_time_range_ms(stream, space)
+        start, end = self._parse_time_range_ms(stream_key, time_range_ms)
+
+        return StreamSpaceTimeRange(
+            stream_key=stream_key,
+            space=space,
+            start=start,
+            end=end,
         )
 
     def get_stream_messages_text(
@@ -185,17 +229,19 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
         stream_key: str,
         reverse: bool = False,
         count: int = 10,
+        space: str | None = None,
     ) -> str:
         if count < 1:
             raise ValueError("count must be at least 1.")
 
         stream = self.get_stream(stream_key)
-        messages = self._read_stream_messages(stream, reverse, count)
+        messages = self._read_stream_messages(stream, reverse, count, space)
 
         return self._format_stream_messages_preview(
             stream_key=stream_key,
             reverse=reverse,
             count=count,
+            space=space,
             messages=messages,
         )
 
@@ -317,6 +363,7 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
         stream_key: str,
         reverse: bool,
         count: int,
+        space: str | None,
         messages: list[dict[str, Any]],
     ) -> str:
         direction = "last" if reverse else "first"
@@ -324,6 +371,8 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
             f"Stream: {stream_key}",
             f"Showing {len(messages)} of requested {count} {direction} messages",
         ]
+        if space is not None:
+            header_lines.insert(1, f"Space: {space or '<default>'}")
 
         return self._format_messages_preview(
             header_lines=header_lines,
@@ -530,6 +579,29 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
     @staticmethod
     def _timestamp_ms_to_datetime_utc(timestamp_ms: int) -> datetime:
         return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+
+    @classmethod
+    def _parse_time_range_ms(
+        cls,
+        stream_key: str,
+        time_range_ms: Any,
+    ) -> tuple[datetime | None, datetime | None]:
+        if not time_range_ms:
+            return None, None
+
+        if len(time_range_ms) != 2:
+            raise InvalidStreamTimeRangeError(stream_key, time_range_ms)
+
+        start_timestamp_ms = time_range_ms[0]
+        end_timestamp_ms = time_range_ms[1]
+
+        if start_timestamp_ms > end_timestamp_ms:
+            raise InvalidStreamTimeRangeError(stream_key, time_range_ms)
+
+        return (
+            cls._timestamp_ms_to_datetime_utc(start_timestamp_ms),
+            cls._timestamp_ms_to_datetime_utc(end_timestamp_ms),
+        )
 
     @staticmethod
     def _closing(cursor: Any) -> AbstractContextManager[Any]:
