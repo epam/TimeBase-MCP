@@ -768,7 +768,9 @@ There are two independent directions:
 | `get_stream_schema` | Get the schema of a specific stream | `stream_key`, optional `instance_key` |
 | `get_stream_time_range` | Get the UTC time range of a stream | `stream_key`, optional `instance_key` |
 | `get_stream_symbols` | Get symbols from a stream (sorted, paginated) | `stream_key`, optional `instance_key`, `limit` (1–500), `cursor` |
-| `get_stream_messages` | Preview first/last messages from a stream | `stream_key`, optional `instance_key`, `reverse`, `count` |
+| `list_stream_spaces` | List spaces for a specific stream | `stream_key`, optional `instance_key` |
+| `get_stream_space_time_range` | Get the UTC time range of a stream space | `stream_key`, `space`, optional `instance_key` |
+| `get_stream_messages` | Preview first/last messages from a stream | `stream_key`, optional `instance_key`, `reverse`, `count`, `space` |
 | `execute_query` | Execute a TimeBase QQL query (limited preview) | `query`, optional `instance_key`, `limit` (1–100) |
 | `compile_query` | Compile a QQL query (parser-level diagnostics only) | `query`, optional `instance_key` |
 | `list_qql_functions` | List QQL function signatures supported by the connected TimeBase server | optional `instance_key`, `kind` (`all`, `stateless`, `stateful`), `function_id` |

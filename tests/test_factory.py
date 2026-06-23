@@ -73,11 +73,25 @@ class StubTimeBaseClient(TimeBaseClient):
     def _list_stream_symbols(self, stream: object) -> list[str]:
         raise NotImplementedError
 
+    def _get_stream_time_range_ms(self, stream: object) -> list[int] | None:
+        raise NotImplementedError
+
+    def _list_stream_spaces(self, stream: object) -> list[str] | None:
+        raise NotImplementedError
+
+    def _get_stream_space_time_range_ms(
+        self,
+        stream: object,
+        space: str,
+    ) -> list[int] | None:
+        raise NotImplementedError
+
     def _read_stream_messages(
         self,
         stream: object,
         reverse: bool,
         count: int,
+        space: str | None,
     ) -> list[dict[str, object]]:
         raise NotImplementedError
 

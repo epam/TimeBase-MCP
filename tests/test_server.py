@@ -107,6 +107,8 @@ async def test_list_tools_resources_and_templates(
             "list_streams",
             "get_stream_schema",
             "get_stream_time_range",
+            "list_stream_spaces",
+            "get_stream_space_time_range",
             "get_stream_symbols",
             "get_stream_messages",
             "execute_query",
@@ -143,6 +145,14 @@ async def test_list_tools_resources_and_templates(
                 "openWorldHint": True,
             },
             "get_stream_time_range": {
+                "readOnlyHint": True,
+                "openWorldHint": True,
+            },
+            "list_stream_spaces": {
+                "readOnlyHint": True,
+                "openWorldHint": True,
+            },
+            "get_stream_space_time_range": {
                 "readOnlyHint": True,
                 "openWorldHint": True,
             },
@@ -476,6 +486,98 @@ async def test_call_stream_tool_uses_single_instance_when_key_is_omitted(
 
     assert result.isError is False
     assert selected_instances == [None]
+
+
+@pytest.mark.anyio
+async def test_call_stream_space_tools_pass_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[ClientSession],
+    ],
+) -> None:
+    selected_instances: list[str | None] = []
+    calls: list[tuple[str, str, str | None]] = []
+
+    async def run_stream_operation(_ctx, operation, *, instance_key=None):
+        selected_instances.append(instance_key)
+
+        class StubClient:
+            def get_stream_spaces(self, stream_key: str):
+                calls.append(("spaces", stream_key, None))
+                return {
+                    "stream_key": stream_key,
+                    "spaces": ["", "blue"],
+                    "returned_count": 2,
+                    "supports_spaces": True,
+                }
+
+            def get_stream_space_time_range(self, stream_key: str, space: str):
+                calls.append(("space_range", stream_key, space))
+                return {
+                    "stream_key": stream_key,
+                    "space": space,
+                    "start": None,
+                    "end": None,
+                }
+
+            def get_stream_messages_text(
+                self,
+                stream_key: str,
+                reverse: bool,
+                count: int,
+                space: str | None = None,
+            ) -> str:
+                assert reverse is True
+                assert count == 3
+                calls.append(("messages", stream_key, space))
+                return f"messages:{stream_key}:{space}"
+
+        return operation(StubClient())
+
+    monkeypatch.setattr(stream_tools, "run_with_context", run_stream_operation)
+
+    async with client_session_factory(None) as client_session:
+        spaces_result = await client_session.call_tool(
+            "list_stream_spaces",
+            {"stream_key": "bars", "instance_key": "dev"},
+        )
+        range_result = await client_session.call_tool(
+            "get_stream_space_time_range",
+            {"stream_key": "bars", "space": "blue", "instance_key": "dev"},
+        )
+        messages_result = await client_session.call_tool(
+            "get_stream_messages",
+            {
+                "stream_key": "bars",
+                "space": "blue",
+                "reverse": True,
+                "count": 3,
+                "instance_key": "dev",
+            },
+        )
+
+    assert spaces_result.isError is False
+    assert spaces_result.structuredContent == {
+        "stream_key": "bars",
+        "spaces": ["", "blue"],
+        "returned_count": 2,
+        "supports_spaces": True,
+    }
+    assert range_result.isError is False
+    assert range_result.structuredContent == {
+        "stream_key": "bars",
+        "space": "blue",
+        "start": None,
+        "end": None,
+    }
+    assert messages_result.isError is False
+    assert selected_instances == ["dev", "dev", "dev"]
+    assert calls == [
+        ("spaces", "bars", None),
+        ("space_range", "bars", "blue"),
+        ("messages", "bars", "blue"),
+    ]
 
 
 @pytest.mark.anyio
