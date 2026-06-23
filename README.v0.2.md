@@ -29,9 +29,9 @@ For a full list of settings and behaviors, see the [Reference](#reference).
 <!--TODO: Remove pre-release flags when v0.2 is released.-->
 | Tool | Command |
 | - | - |
-| **uv (recommended)** | `uv tool install -p 3.14 --prerelease allow --from "timebase-mcp[all]" timebase-mcp` |
-| **pip** | `python -m pip install --pre "timebase-mcp[all]"` |
-| **pipx** | `pipx install --pip-args="--pre" --python 3.14 "timebase-mcp[all]"` |
+| **uv (recommended)** | `uv tool install -p 3.14 --from "timebase-mcp[all]==0.2.0rc2" timebase-mcp` |
+| **pip** | `python -m pip install "timebase-mcp[all]==0.2.0rc2"` |
+| **pipx** | `pipx install --python 3.14 "timebase-mcp[all]==0.2.0rc2"` |
 
 The `[all]` extra installs both TimeBase client editions; the server picks the right one per connected instance.
 
@@ -384,7 +384,7 @@ Create an env file from one of the examples below, then run:
 ```bash
 docker run --rm -p 8000:8000 \
   --env-file ./timebase-mcp.env \
-  ghcr.io/epam/timebase-mcp:0.2.0rc1
+  ghcr.io/epam/timebase-mcp:0.2.0rc2
 ```
 
 </details>
