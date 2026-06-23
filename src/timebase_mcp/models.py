@@ -71,3 +71,16 @@ class CompileQQLResult(BaseModel):
         description="Short query snippet around parser failure position.",
     )
     error_position: QQLErrorPosition | None = None
+
+
+class QQLFunctionGroup(BaseModel):
+    id: str
+    signatures: list[str] = Field(default_factory=list)
+    overload_count: int = 0
+
+
+class QQLFunctionsResult(BaseModel):
+    stateless: list[QQLFunctionGroup] = Field(default_factory=list)
+    stateful: list[QQLFunctionGroup] = Field(default_factory=list)
+    function_count: int = 0
+    overload_count: int = 0

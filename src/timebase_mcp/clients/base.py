@@ -1,4 +1,6 @@
 import base64
+import json
+import re
 from abc import ABC, abstractmethod
 from binascii import Error as BinasciiError
 from collections.abc import Callable
@@ -6,25 +8,30 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from types import TracebackType
 from typing import Any, Literal
-import json
-import re
 
 from timebase_mcp.errors import InvalidStreamTimeRangeError
+from timebase_mcp.instance import TimeBaseInstanceConfig
 from timebase_mcp.models import (
     CompileQQLResult,
     QQLErrorPosition,
+    QQLFunctionsResult,
     StreamInfo,
     StreamSchema,
     StreamSymbols,
     StreamTimeRange,
 )
-from timebase_mcp.instance import TimeBaseInstanceConfig
+from timebase_mcp.qql_functions import normalize_qql_functions
 
 
 class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
     _DEFAULT_STREAM_SYMBOLS_PAGE_SIZE = 100
     _MAX_STREAM_SYMBOLS_PAGE_SIZE = 500
     _ERROR_CONTEXT_CHARS = 40
+    _QQL_FUNCTIONS_LIMIT = 10_000
+    _QQL_FUNCTION_SOURCE = {
+        "stateless": "stateless_functions()",
+        "stateful": "stateful_functions()",
+    }
 
     def __init__(
         self,
@@ -228,6 +235,46 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
             )
 
         return CompileQQLResult(valid=True)
+
+    def list_qql_functions(
+        self,
+        kind: Literal["all", "stateless", "stateful"] = "all",
+        function_id: str | None = None,
+    ) -> QQLFunctionsResult:
+        result = QQLFunctionsResult()
+        selected_kinds = ("stateless", "stateful") if kind == "all" else (kind,)
+        for selected_kind in selected_kinds:
+            query_text = self._qql_functions_query(
+                selected_kind,
+                function_id=function_id,
+            )
+            messages = self._read_query_messages(query_text, self._QQL_FUNCTIONS_LIMIT)
+            functions = normalize_qql_functions(selected_kind, messages)
+            setattr(result, selected_kind, functions)
+
+        result.function_count = len(result.stateless) + len(result.stateful)
+        result.overload_count = sum(
+            function.overload_count
+            for function in [*result.stateless, *result.stateful]
+        )
+        return result
+
+    @classmethod
+    def _qql_functions_query(
+        cls,
+        kind: Literal["stateless", "stateful"],
+        *,
+        function_id: str | None,
+    ) -> str:
+        source = cls._QQL_FUNCTION_SOURCE[kind]
+        if function_id is None:
+            return f"SELECT {source} AS FUNCS"
+
+        escaped_function_id = function_id.replace("'", "''")
+        return (
+            f"SELECT f AS FUNCS ARRAY JOIN {source} AS f "
+            f"WHERE f.id == '{escaped_function_id}'"
+        )
 
     def _normalize_message(self, message: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {

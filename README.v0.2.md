@@ -771,6 +771,7 @@ There are two independent directions:
 | `get_stream_messages` | Preview first/last messages from a stream | `stream_key`, optional `instance_key`, `reverse`, `count` |
 | `execute_query` | Execute a TimeBase QQL query (limited preview) | `query`, optional `instance_key`, `limit` (1–100) |
 | `compile_query` | Compile a QQL query (parser-level diagnostics only) | `query`, optional `instance_key` |
+| `list_qql_functions` | List QQL function signatures supported by the connected TimeBase server | optional `instance_key`, `kind` (`all`, `stateless`, `stateful`), `function_id` |
 | `get_server_configuration` | Get MCP server runtime configuration and all configured TimeBase instances | None |
 
 ### Resources
