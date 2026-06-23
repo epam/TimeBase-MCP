@@ -2,8 +2,9 @@
 
 SERVER_INSTRUCTIONS = """\
 TimeBase MCP connects to configured TimeBase instances. Use list_timebase_instances
-when choosing between configured instances; pass the chosen name as the optional
-instance_key argument for each TB operation. In single-instance setups, omit it.
+when choosing between configured instances; pass the chosen name as the
+instance_key argument for each TB operation. In multi-instance setups,
+instance_key is required. In single-instance setups, omit it.
 
 Before querying: discover streams, read schema, then check time range and symbols.
 Sample messages only when you need raw examples.

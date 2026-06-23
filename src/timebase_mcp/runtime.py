@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 
+from timebase_mcp.auth.principal import current_principal
+from timebase_mcp.clients.factory import get_detected_edition
 from timebase_mcp.config import MCPSettings
 from timebase_mcp.instance import (
     DEFAULT_INSTANCE_KEY,
     TimeBaseInstanceConfig,
     TimeBaseInstanceRuntime,
 )
+from timebase_mcp.models import MCPServerConfiguration, TimeBaseServerConfiguration
 from timebase_mcp.pool import TimeBaseOperationBudget
 
 
@@ -50,16 +54,25 @@ class TimeBaseRuntime:
         )
 
     def get_instance(self, key: str | None = None) -> TimeBaseInstanceRuntime:
-        resolved_key = key or self.default_instance_key
-        instance = self.instances.get(resolved_key)
-        if instance is None:
-            available = ", ".join(self.instances) or "<none>"
+        if key is None:
+            if len(self.instances) == 1:
+                return next(iter(self.instances.values()))
+
             raise ValueError(
-                f"Unknown TimeBase instance: {resolved_key}. "
-                f"Available instances: {available}."
+                "instance_key is required when multiple TimeBase instances are configured. "
+                "Call list_timebase_instances to choose an instance."
             )
 
+        resolved_key = key
+        instance = self.instances.get(resolved_key)
+        if instance is None:
+            raise ValueError(f"Unknown TimeBase instance: {resolved_key}.")
+
         return instance
+
+    @property
+    def requires_instance_key(self) -> bool:
+        return len(self.instances) > 1
 
     @property
     def default_instance(self) -> TimeBaseInstanceRuntime:
@@ -78,3 +91,46 @@ def build_runtime(settings: MCPSettings) -> TimeBaseRuntime:
     """Build the lifespan-owned runtime state from startup settings."""
 
     return TimeBaseRuntime.from_settings(settings)
+
+
+def _dxapi_ssl_termination() -> bool:
+    return os.environ.get("DXAPI_SSL_TERMINATION", "").casefold() == "true"
+
+
+def _dxapi_ssl_trust_all() -> bool:
+    return os.environ.get("DXAPI_SSL_TRUST_ALL", "").casefold() == "true"
+
+
+def _timebase_server_configuration(
+    instance: TimeBaseInstanceRuntime,
+) -> TimeBaseServerConfiguration:
+    config = instance.config
+    return TimeBaseServerConfiguration(
+        name=instance.key,
+        description=config.description,
+        url=config.tb_url,
+        username=config.tb_username,
+        edition=get_detected_edition(instance),
+        outbound_auth_mode=config.auth_mode,
+        http_url=config.http_base_url,
+        dxapi_ssl_termination=_dxapi_ssl_termination(),
+        dxapi_ssl_trust_all=_dxapi_ssl_trust_all(),
+    )
+
+
+def build_server_configuration(runtime: TimeBaseRuntime) -> MCPServerConfiguration:
+    server_settings = runtime.server_settings
+    principal = current_principal()
+
+    return MCPServerConfiguration(
+        transport=server_settings.transport,
+        inbound_auth_mode=server_settings.inbound_auth_mode,
+        principal=(
+            (principal.username or principal.subject) if principal is not None else None
+        ),
+        oauth_redirect_uri=server_settings.resolved_interactive_redirect_uri,
+        timebase_instances=[
+            _timebase_server_configuration(instance)
+            for instance in runtime.instances.values()
+        ],
+    )
