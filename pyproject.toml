@@ -71,6 +71,9 @@ dev = [
     "pytest>=9.0.3",
     "ruff>=0.15.11",
 ]
+stress = [
+    "locust>=2.44.4,<3.0.0",
+]
 
 [tool.basedpyright]
 include = ["src", "tests"]

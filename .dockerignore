@@ -29,4 +29,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-tests/
+tests/**
+!tests/stress/
+tests/stress/**
+!tests/stress/locust/
+tests/stress/locust/**
+!tests/stress/locust/locustfile.py
+!tests/stress/locust/mcp_streamable_http.py

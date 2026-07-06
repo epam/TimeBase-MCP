@@ -1,0 +1,88 @@
+name: timebase-mcp-stress
+
+services:
+  timebase:
+    image: finos/timebase-ce-server:6.2
+    stop_grace_period: 5m
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    environment:
+      JAVA_OPTS: >-
+        -Xms${TIMEBASE_HEAP:-2g}
+        -Xmx${TIMEBASE_HEAP:-2g}
+    ports:
+      - "${TIMEBASE_PORT:-8011}:8011"
+      - "${TIMEBASE_HTTP_PORT:-8021}:8021"
+    volumes:
+      - timebase-home:/timebase-home
+      - ./timebase/admin.properties:/timebase-home/config/admin.properties:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:8021/tb/ping || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  setup:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    entrypoint: ["python", "/stress/setup/setup_timebase.py"]
+    environment:
+      TIMEBASE_URL: dxtick://timebase:8011
+      STRESS_STREAM_KEY: ${STRESS_STREAM_KEY:-mcp_stress_bars}
+      STRESS_STREAM_ROWS: ${STRESS_STREAM_ROWS:-10000}
+      STRESS_STREAM_SYMBOLS: ${STRESS_STREAM_SYMBOLS:-AAPL,MSFT,NVDA,GOOG,AMZN,META,TSLA,IBM}
+    volumes:
+      - ./setup:/stress/setup:ro
+    depends_on:
+      timebase:
+        condition: service_healthy
+    restart: "no"
+
+  timebase-mcp:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      TIMEBASE_URL: dxtick://timebase:8011
+      TIMEBASE_AUTH_MODE: none
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+      MCP_MAX_CONCURRENT_OPS: ${MCP_MAX_CONCURRENT_OPS:-10}
+      MCP_OPERATION_TIMEOUT_SECONDS: ${MCP_OPERATION_TIMEOUT_SECONDS:-60}
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-INFO}
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    depends_on:
+      timebase:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+
+  locust:
+    build:
+      context: ../..
+      dockerfile: tests/stress/locust/Dockerfile
+    environment:
+      LOCUST_MCP_PATH: /mcp
+      LOCUST_STREAM_KEY: ${STRESS_STREAM_KEY:-mcp_stress_bars}
+      LOCUST_WAIT_MIN_SECONDS: ${LOCUST_WAIT_MIN_SECONDS:-0.2}
+      LOCUST_WAIT_MAX_SECONDS: ${LOCUST_WAIT_MAX_SECONDS:-2.0}
+    ports:
+      - "${LOCUST_PORT:-8089}:8089"
+    depends_on:
+      - timebase-mcp
+    command:
+      - --host
+      - http://timebase-mcp:8000
+
+volumes:
+  timebase-home:
