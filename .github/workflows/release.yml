@@ -91,10 +91,13 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: uv sync --locked --all-groups --extra community
+        run: uv sync --locked --all-groups --extra all
 
       - name: Lint
         run: uv run ruff check .
+
+      - name: Type check
+        run: uv run basedpyright
 
       - name: Test
         run: uv run pytest

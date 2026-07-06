@@ -66,10 +66,20 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.39.9",
     "inline-snapshot>=0.32.7",
     "pytest>=9.0.3",
     "ruff>=0.15.11",
 ]
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+reportMissingImports = true
+reportImplicitOverride = true
+reportIncompatibleMethodOverride = true
+reportUnnecessaryTypeIgnoreComment = true
 
 [tool.inline-snapshot]
 format-command="ruff check --fix-only --stdin-filename {filename} | ruff format --stdin-filename {filename}"
