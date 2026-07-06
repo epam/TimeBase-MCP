@@ -1,6 +1,6 @@
 # TimeBase MCP
 
-A [Model Context Protocol](https://modelcontextprotocol.io/introduction) server that lets an agent (Claude Code, VS Code, Cursor, Claude Desktop, etc.) explore and query [TimeBase](https://kb.timebase.info): list streams, read schemas and symbols, preview messages, and run QQL queries.
+A [Model Context Protocol](https://modelcontextprotocol.io/introduction) server that lets a coding agent (Claude Code, VS Code, Cursor, Claude Desktop, etc.) explore and query [TimeBase](https://kb.timebase.info): list streams, read schemas and symbols, preview messages, run QQL queries, and inspect server status and activity.
 
 The server can run two ways:
 
@@ -363,7 +363,10 @@ Shared remote servers should limit concurrent TimeBase operations so one busy ag
 | Variable | Default | What it does |
 | - | - | - |
 | `MCP_MAX_CONCURRENT_OPS` | `0` (unlimited) | Max concurrent TimeBase operations in flight. When the limit is reached, new tool calls fail with a backpressure error. |
+| `MCP_MAX_IDLE_CLIENTS` | `0` (auto) | Max idle TimeBase connections kept per shared pool. `0` selects `max(1, MCP_MAX_CONCURRENT_OPS / 2)`. |
 | `MCP_OPERATION_TIMEOUT_SECONDS` | `0` (disabled) | Per-operation deadline in seconds. |
+
+Per-user `forward_identity` pools do not keep idle connections between requests.
 
 Example configuration (tune to your TimeBase capacity):
 
@@ -496,7 +499,7 @@ Connections to TimeBase may need extra SSL variables handled by `dxapi`:
 
 - `DXAPI_SSL_TERMINATION=true` — TimeBase is behind an HTTPS/TLS terminator.
 - `DXAPI_SSL_CERT_FILE=/path/to/cert.der` — trust a private/self-signed certificate.
-- `DXAPI_SSL_TRUST_ALL=true` — disable certificate verification, this also disables verification for OAuth discovery fetches.
+- `DXAPI_SSL_TRUST_ALL=true` — disable certificate verification, this also disables verification for TimeBase HTTP API fetches.
 
 See [dxapi environment variables](https://kb.timebase.info/docs/development/clients/python%20dxapi/python_dxapi_configuration#environment-variables) and [SSL configuration](https://kb.timebase.info/docs/development/clients/python%20dxapi/python_dxapi_configuration#ssl-configuration).
 
@@ -658,7 +661,7 @@ Cursor uses static OAuth, when DCR is unavailable: supply the client ID the IdP 
 | `TIMEBASE_USERNAME` | None | Username for `basic` auth; optional username override for `oauth2_client_credentials`. |
 | `TIMEBASE_PASSWORD` | None | Password for `basic` auth. |
 | `TIMEBASE_AUTH_MODE` | `auto` | Outbound mode: `auto`, `none`, `basic`, `oauth2_client_credentials`, `forward_identity`, `interactive`. |
-| `TIMEBASE_HTTP_URL` | derived | TimeBase HTTP base URL for OAuth discovery. MCP derives this from `TIMEBASE_URL` when unset. **Enterprise 5.6 and earlier** serve HTTP on the same port as native (typically `8011`). **Community Edition and Enterprise 5.7** use a separate HTTP port by default (typically `8021`), set `TIMEBASE_HTTP_URL` explicitly for those versions. |
+| `TIMEBASE_HTTP_URL` | derived | TimeBase HTTP API base URL, used for OAuth discovery and HTTP diagnostics. MCP derives this from `TIMEBASE_URL` when unset and also tries port `8021` when the native URL uses port default `8011`. Set explicitly for proxies, custom ports, or non-default paths. |
 | `TIMEBASE_OAUTH2_TOKEN_URL` | None | Token endpoint for outbound service-account client credentials. |
 | `TIMEBASE_OAUTH2_CLIENT_ID` | None / discovered | OAuth2 client ID for service-account auth, or a dedicated client-app override for local `interactive` login. |
 | `TIMEBASE_OAUTH2_CLIENT_SECRET` | None | OAuth2 client secret for service-account auth. |
@@ -668,6 +671,7 @@ Cursor uses static OAuth, when DCR is unavailable: supply the client ID the IdP 
 | `MCP_HOST` | `127.0.0.1` | HTTP bind host. For stdio, also the loopback host used for interactive OAuth redirect (`http://MCP_HOST:MCP_PORT/`). |
 | `MCP_PORT` | `8000` | HTTP bind port (1–65535). For stdio, also the loopback port used for interactive OAuth redirect. |
 | `MCP_MAX_CONCURRENT_OPS` | `0` | Max concurrent TimeBase operations (`0` disables limits). |
+| `MCP_MAX_IDLE_CLIENTS` | `0` (auto) | Max idle TimeBase connections per shared pool. `0` = `max(1, MCP_MAX_CONCURRENT_OPS / 2)`. Per-user `forward_identity` pools always use `0`. |
 | `MCP_OPERATION_TIMEOUT_SECONDS` | `0` | Per-operation timeout in seconds (`0` disables). |
 | `MCP_AUTH_ISSUER_URL` | discovered | IdP mode: issuer override. Required when TimeBase `/tb/oauthinfo` is empty or for a separate MCP API audience. |
 | `MCP_AUTH_JWKS_URL` | discovered | IdP mode: JWKS URL override. If unset, discovered from `/tb/oauthinfo`. |
@@ -774,6 +778,9 @@ There are two independent directions:
 | `execute_query` | Execute a TimeBase QQL query (limited preview) | `query`, optional `instance_key`, `limit` (1–100) |
 | `compile_query` | Compile a QQL query (parser-level diagnostics only) | `query`, optional `instance_key` |
 | `list_qql_functions` | List QQL function signatures supported by the connected TimeBase server | optional `instance_key`, `kind` (`all`, `stateless`, `stateful`), `function_id` |
+| `get_timebase_status` | TimeBase version, license, and runtime summary | optional `instance_key` |
+| `list_timebase_activity` | Active cursors, loaders, connections, and locks | optional `instance_key`, `kind`, `limit` |
+| `get_timebase_activity_detail` | Details for one cursor, loader, connection, or lock | `kind`, `id`, optional `instance_key`, instrument paging |
 | `get_server_configuration` | Get MCP server runtime configuration and all configured TimeBase instances | None |
 
 ### Resources
@@ -906,7 +913,7 @@ Logs are printed to stderr of the `timebase-mcp` process, look for them in the t
 
 - **`Wrong username or password` with URL-only config:** the server is protected but MCP connected anonymously. Locally, keep `TIMEBASE_AUTH_MODE` unset (auto) or set `interactive`. Remotely, use `forward_identity` or a service account.
 
-- **OAuth discovery fails for `/tb/oauthinfo`:** On **Enterprise 5.6 and earlier**, HTTP is usually on the same port as `TIMEBASE_URL`, explicit `TIMEBASE_HTTP_URL` is unnecessary. On **CE / Enterprise 5.7**, set `TIMEBASE_HTTP_URL` to the HTTP base (typically `https://host:8021`).
+- **OAuth discovery fails for `/tb/oauthinfo`:** MCP derives the TimeBase HTTP URL from `TIMEBASE_URL` and, when the native port is `8011`, also tries default HTTP port `8021`. Set `TIMEBASE_HTTP_URL` explicitly for proxies, custom ports, custom paths, or when automatic probing cannot reach the TimeBase HTTP API.
 
 - **Redirect URI mismatch during interactive login:** the browser shows a redirect error from your IdP. MCP sent a `redirect_uri` that is not registered on the OAuth client. Fix it:
   1. Find `OAuth callback URI` in the MCP logs.

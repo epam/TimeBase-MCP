@@ -33,6 +33,7 @@ def test_settings_use_defaults_when_environment_is_not_set() -> None:
     assert settings.port == DEFAULT_PORT
     assert settings.log_level == "INFO"
     assert settings.max_concurrent_ops == 0
+    assert settings.max_idle_clients == 0
     assert settings.operation_timeout_seconds == 0
 
 
@@ -45,6 +46,7 @@ def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv(SettingsEnv.MCP_PORT, "8080")
     monkeypatch.setenv(SettingsEnv.MCP_LOG_LEVEL, "debug")
     monkeypatch.setenv(SettingsEnv.MCP_MAX_CONCURRENT_OPS, "4")
+    monkeypatch.setenv(SettingsEnv.MCP_MAX_IDLE_CLIENTS, "3")
     monkeypatch.setenv(SettingsEnv.MCP_OPERATION_TIMEOUT_SECONDS, "30")
 
     settings = MCPSettings()
@@ -59,6 +61,7 @@ def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.port == 8080
     assert settings.log_level == "DEBUG"
     assert settings.max_concurrent_ops == 4
+    assert settings.max_idle_clients == 3
     assert settings.operation_timeout_seconds == 30
     assert settings.oauth2_config is None
     assert settings.uses_oauth2 is False
@@ -172,6 +175,7 @@ def test_settings_ignore_empty_environment_values(
     assert settings.port == DEFAULT_PORT
     assert settings.log_level == "INFO"
     assert settings.max_concurrent_ops == 0
+    assert settings.max_idle_clients == 0
     assert settings.operation_timeout_seconds == 0
     assert settings.oauth2_config is None
     assert settings.uses_oauth2 is False
@@ -181,6 +185,7 @@ def test_settings_ignore_empty_environment_values(
     ("environment_variable", "value"),
     [
         (SettingsEnv.MCP_MAX_CONCURRENT_OPS, "-1"),
+        (SettingsEnv.MCP_MAX_IDLE_CLIENTS, "-1"),
         (SettingsEnv.MCP_OPERATION_TIMEOUT_SECONDS, "-5"),
     ],
 )
@@ -193,6 +198,28 @@ def test_settings_raise_validation_error_for_invalid_guardrail_values(
 
     with pytest.raises(ValidationError):
         MCPSettings()
+
+
+@pytest.mark.parametrize(
+    ("max_idle_clients", "max_concurrent_ops", "expected"),
+    [
+        (0, 10, 5),
+        (0, 1, 1),
+        (0, 0, 1),
+        (4, 10, 4),
+    ],
+)
+def test_settings_resolve_shared_max_idle_clients(
+    max_idle_clients: int,
+    max_concurrent_ops: int,
+    expected: int,
+) -> None:
+    settings = MCPSettings(
+        max_idle_clients=max_idle_clients,
+        max_concurrent_ops=max_concurrent_ops,
+    )
+
+    assert settings.resolved_shared_max_idle_clients() == expected
 
 
 def test_settings_raise_validation_error_for_invalid_port(

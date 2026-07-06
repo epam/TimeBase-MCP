@@ -103,6 +103,9 @@ async def test_list_tools_resources_and_templates(
         [
             "list_timebase_instances",
             "get_server_configuration",
+            "get_timebase_status",
+            "list_timebase_activity",
+            "get_timebase_activity_detail",
             "list_streams",
             "get_stream_schema",
             "get_stream_time_range",
@@ -134,6 +137,18 @@ async def test_list_tools_resources_and_templates(
             "get_server_configuration": {
                 "readOnlyHint": True,
                 "openWorldHint": False,
+            },
+            "get_timebase_status": {
+                "readOnlyHint": True,
+                "openWorldHint": True,
+            },
+            "list_timebase_activity": {
+                "readOnlyHint": True,
+                "openWorldHint": True,
+            },
+            "get_timebase_activity_detail": {
+                "readOnlyHint": True,
+                "openWorldHint": True,
             },
             "list_streams": {
                 "readOnlyHint": True,
@@ -609,6 +624,88 @@ async def test_call_stream_tool_requires_instance_key_when_multiple_instances() 
         "instance_key is required when multiple TimeBase instances are configured. "
         "Call list_timebase_instances to choose an instance."
     ]
+
+
+@pytest.mark.anyio
+async def test_call_get_timebase_status_tool(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[ClientSession],
+    ],
+) -> None:
+    monkeypatch.delenv("DXAPI_SSL_TERMINATION", raising=False)
+    monkeypatch.delenv("DXAPI_SSL_TRUST_ALL", raising=False)
+
+    def fake_request(method: str, url: str, *, timeout: float, verify: bool, **kwargs):
+        request = httpx.Request(method, url)
+        if url == "http://tb.example.com:8021/tb/ping":
+            return httpx.Response(200, request=request)
+        if url == "http://tb.example.com:8021/tb/oauthinfo":
+            return httpx.Response(200, request=request, content=b"")
+        if url == "http://tb.example.com:8021/tb/api/info":
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "version": "5.7.13",
+                },
+            )
+        if url == "http://tb.example.com:8021/tb/api/license":
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "valid": True,
+                    "validUntil": "2026-12-31",
+                    "expirationTime": "2026-12-31",
+                    "daysValid": 180,
+                    "offline": False,
+                    "lastValidateTime": "2026-06-29 10:00:00",
+                    "clientName": "ACME",
+                    "productName": "TimeBase",
+                    "error": None,
+                },
+            )
+        if url == "http://tb.example.com:8021/tb/api/server/security":
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "enabled": True,
+                    "controllerType": "FILE",
+                },
+            )
+        if url == "http://tb.example.com:8021/tb/api/server/system?gc=false":
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "timestamp": 100,
+                    "cpuCount": 8,
+                    "maxMemoryMb": 4096,
+                    "usedMemoryMb": 1024,
+                    "currentMemoryMb": 2048,
+                    "availableMemoryMb": 3072,
+                    "systemProperties": {"os.name": "Mac OS X", "java.version": "21"},
+                },
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+    )
+    settings = MCPSettings(tb_http_url="http://tb.example.com:8021")
+
+    async with client_session_factory(settings) as client_session:
+        result = await client_session.call_tool("get_timebase_status", {})
+
+    assert result.isError is False
+    assert result.structuredContent is not None
+    assert result.structuredContent["version"] == "5.7.13"
+    assert result.structuredContent["security"]["enabled"] is True
+    assert result.structuredContent["license"]["valid_until"] == "2026-12-31"
+    assert result.structuredContent["runtime"]["java_version"] == "21"
 
 
 @pytest.mark.anyio
