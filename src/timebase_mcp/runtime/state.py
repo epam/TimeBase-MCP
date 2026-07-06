@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass, field
 
-from timebase_mcp.auth.principal import current_principal
-from timebase_mcp.clients.factory import get_detected_edition
-from timebase_mcp.config import MCPSettings
-from timebase_mcp.instance import (
+from timebase_mcp.config.settings import MCPSettings
+from timebase_mcp.constants import (
     DEFAULT_INSTANCE_KEY,
+    FORWARD_IDENTITY_MAX_IDLE_CLIENTS,
+)
+from timebase_mcp.runtime.instance import (
     TimeBaseInstanceConfig,
     TimeBaseInstanceRuntime,
 )
-from timebase_mcp.models import MCPServerConfiguration, TimeBaseServerConfiguration
-from timebase_mcp.pool import TimeBaseOperationBudget
+from timebase_mcp.runtime.pool import TimeBaseOperationBudget
 
 
 @dataclass(slots=True)
@@ -45,6 +44,8 @@ class TimeBaseRuntime:
                     settings.detected_edition if instance_key == default_key else None
                 ),
                 operation_budget=operation_budget,
+                shared_max_idle_clients=settings.resolved_shared_max_idle_clients(),
+                forward_identity_max_idle_clients=FORWARD_IDENTITY_MAX_IDLE_CLIENTS,
             )
         return cls(
             server_settings=settings,
@@ -91,46 +92,3 @@ def build_runtime(settings: MCPSettings) -> TimeBaseRuntime:
     """Build the lifespan-owned runtime state from startup settings."""
 
     return TimeBaseRuntime.from_settings(settings)
-
-
-def _dxapi_ssl_termination() -> bool:
-    return os.environ.get("DXAPI_SSL_TERMINATION", "").casefold() == "true"
-
-
-def _dxapi_ssl_trust_all() -> bool:
-    return os.environ.get("DXAPI_SSL_TRUST_ALL", "").casefold() == "true"
-
-
-def _timebase_server_configuration(
-    instance: TimeBaseInstanceRuntime,
-) -> TimeBaseServerConfiguration:
-    config = instance.config
-    return TimeBaseServerConfiguration(
-        name=instance.key,
-        description=config.description,
-        url=config.tb_url,
-        username=config.tb_username,
-        edition=get_detected_edition(instance),
-        outbound_auth_mode=config.auth_mode,
-        http_url=config.http_base_url,
-        dxapi_ssl_termination=_dxapi_ssl_termination(),
-        dxapi_ssl_trust_all=_dxapi_ssl_trust_all(),
-    )
-
-
-def build_server_configuration(runtime: TimeBaseRuntime) -> MCPServerConfiguration:
-    server_settings = runtime.server_settings
-    principal = current_principal()
-
-    return MCPServerConfiguration(
-        transport=server_settings.transport,
-        inbound_auth_mode=server_settings.inbound_auth_mode,
-        principal=(
-            (principal.username or principal.subject) if principal is not None else None
-        ),
-        oauth_redirect_uri=server_settings.resolved_interactive_redirect_uri,
-        timebase_instances=[
-            _timebase_server_configuration(instance)
-            for instance in runtime.instances.values()
-        ],
-    )

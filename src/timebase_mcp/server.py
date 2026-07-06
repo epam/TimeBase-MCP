@@ -7,11 +7,11 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 
 from timebase_mcp.auth.inbound import build_inbound_auth
-from timebase_mcp.config import MCPSettings
+from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.constants import APP_NAME
 from timebase_mcp.instructions import SERVER_INSTRUCTIONS
 from timebase_mcp.resources import register_resources
-from timebase_mcp.runtime import TimeBaseRuntime, build_runtime
+from timebase_mcp.runtime.state import TimeBaseRuntime, build_runtime
 from timebase_mcp.tools import register_tools
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 def _resolve_inbound_auth(
     settings: MCPSettings,
+    runtime: TimeBaseRuntime,
 ) -> tuple[AuthSettings | None, TokenVerifier | None]:
     """Resolve inbound auth for the configured transport.
 
@@ -28,7 +29,10 @@ def _resolve_inbound_auth(
         return None, None
 
     if settings.inbound_auth_enabled:
-        inbound = build_inbound_auth(settings)
+        inbound = build_inbound_auth(
+            settings,
+            instance=runtime.get_instance(settings.resolved_default_instance_key),
+        )
         if inbound is not None:
             return inbound.auth_settings, inbound.token_verifier
         return None, None
@@ -45,15 +49,16 @@ def _resolve_inbound_auth(
 
 
 def create_server(settings: MCPSettings) -> FastMCP[TimeBaseRuntime]:
+    runtime = build_runtime(settings)
+
     @asynccontextmanager
     async def lifespan(_: FastMCP[TimeBaseRuntime]) -> AsyncIterator[TimeBaseRuntime]:
-        runtime = build_runtime(settings)
         try:
             yield runtime
         finally:
             await runtime.aclose()
 
-    auth_settings, token_verifier = _resolve_inbound_auth(settings)
+    auth_settings, token_verifier = _resolve_inbound_auth(settings, runtime)
 
     mcp = FastMCP(
         name=APP_NAME,

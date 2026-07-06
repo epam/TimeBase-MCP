@@ -2,7 +2,8 @@ from urllib.parse import unquote
 
 from mcp.server.fastmcp import FastMCP
 
-from timebase_mcp.operations import run_with_context
+from timebase_mcp.runtime.operations import run_with_context
+from timebase_mcp.services import streams as stream_service
 
 
 def register_resources(mcp: FastMCP) -> None:
@@ -21,7 +22,9 @@ def register_resources(mcp: FastMCP) -> None:
         mime_type="text/plain",
     )
     async def stream_catalog_resource() -> str:
-        streams = await _run_resource_operation(lambda client: client.list_streams())
+        streams = await _run_resource_operation(
+            lambda client: stream_service.list_streams(client)
+        )
         if not streams:
             return "No streams found."
         return "\n".join(
@@ -38,7 +41,7 @@ def register_resources(mcp: FastMCP) -> None:
     )
     async def stream_schema_resource(stream_key: str) -> str:
         schema = await _run_resource_operation(
-            lambda client: client.get_stream_schema(stream_key),
+            lambda client: stream_service.get_stream_schema(client, stream_key),
         )
         return schema.schema_text
 
@@ -52,7 +55,7 @@ def register_resources(mcp: FastMCP) -> None:
     async def instance_stream_catalog_resource(instance_key: str) -> str:
         instance_key = unquote(instance_key)
         streams = await _run_resource_operation(
-            lambda client: client.list_streams(),
+            lambda client: stream_service.list_streams(client),
             instance_key=instance_key,
         )
         if not streams:
@@ -74,7 +77,7 @@ def register_resources(mcp: FastMCP) -> None:
     ) -> str:
         instance_key = unquote(instance_key)
         schema = await _run_resource_operation(
-            lambda client: client.get_stream_schema(stream_key),
+            lambda client: stream_service.get_stream_schema(client, stream_key),
             instance_key=instance_key,
         )
         return schema.schema_text

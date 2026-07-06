@@ -9,10 +9,9 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from timebase_mcp.clients.factory import create_timebase_client, get_detected_edition
-from timebase_mcp.config import Edition
-from timebase_mcp.config import MCPSettings
-from timebase_mcp.runtime import build_runtime
-
+from timebase_mcp.config.settings import MCPSettings
+from timebase_mcp.config.types import Edition
+from timebase_mcp.runtime.state import build_runtime
 
 INTEGRATION_STREAM_KEY = "mcp_integration_bars"
 BAR_MESSAGE_TYPE = "com.epam.deltix.timebase.messages.BarMessage"

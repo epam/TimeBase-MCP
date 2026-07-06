@@ -1,10 +1,10 @@
 import json
 
 import pytest
-from pydantic import SecretStr
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
-from timebase_mcp.config import MCPSettings, SettingsEnv
+from timebase_mcp.config.env import SettingsEnv
+from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.constants import (
     DEFAULT_HOST,
     DEFAULT_PORT,

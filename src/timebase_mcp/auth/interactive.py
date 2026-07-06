@@ -10,6 +10,7 @@ import time
 import webbrowser
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing_extensions import override
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -17,7 +18,6 @@ import httpx
 
 from timebase_mcp.auth.discovery import (
     InteractiveEndpoints,
-    derive_http_base_urls,
     resolve_interactive_endpoints,
 )
 from timebase_mcp.auth.oauth2 import (
@@ -31,7 +31,7 @@ from timebase_mcp.auth.oauth2 import (
 from timebase_mcp.errors import ConfigurationError
 
 if TYPE_CHECKING:
-    from timebase_mcp.instance import TimeBaseInstanceConfig
+    from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    @override
     def log_message(self, format: str, *args: Any) -> None:
         """Silence default stderr logging."""
         return
@@ -133,7 +134,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
     def __init__(
         self,
         *,
-        discovery_base_url: str | tuple[str, ...] | None,
+        instance: TimeBaseInstanceRuntime | None = None,
         client_id_override: str | None = None,
         scope_override: str | None = None,
         issuer_override: str | None = None,
@@ -142,7 +143,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
         monotonic: Callable[[], float] = time.monotonic,
         open_browser: Callable[[str], bool] = webbrowser.open,
     ) -> None:
-        self._discovery_base_url = discovery_base_url
+        self._instance = instance
         self._client_id_override = client_id_override
         self._scope_override = scope_override
         self._issuer_override = issuer_override
@@ -157,6 +158,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
         self._refresh_token: str | None = None
         self._expires_at_monotonic: float | None = None
 
+    @override
     def get_access_token(self) -> str:
         with self._lock:
             if self._access_token is not None and not self._token_expired():
@@ -186,7 +188,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
     def _get_endpoints(self) -> InteractiveEndpoints:
         if self._endpoints is None:
             self._endpoints = resolve_interactive_endpoints(
-                discovery_base_url=self._discovery_base_url,
+                instance=self._instance,
                 issuer_override=self._issuer_override,
                 client_id_override=self._client_id_override,
                 scope_override=self._scope_override,
@@ -366,13 +368,13 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
 
 
 def build_interactive_provider(
-    config: "TimeBaseInstanceConfig",
+    instance: "TimeBaseInstanceRuntime",
     *,
     redirect_uri: str | None = None,
 ) -> OAuth2AccessTokenProvider:
-    discovery_base_url = config.http_base_url or derive_http_base_urls(config.tb_url)
+    config = instance.config
     return InteractiveOAuthProvider(
-        discovery_base_url=discovery_base_url,
+        instance=instance,
         client_id_override=config.tb_oauth2_client_id,
         scope_override=config.tb_oauth2_scope,
         redirect_uri=redirect_uri,

@@ -1,14 +1,17 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import pytest
 from pydantic import SecretStr
+from typing_extensions import override
 
 from timebase_mcp.clients import factory
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.config import Edition
+from timebase_mcp.config.types import Edition
+from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
 from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
-from timebase_mcp.instance import (
-    DEFAULT_INSTANCE_KEY,
+from timebase_mcp.models.core import StreamInfo
+from timebase_mcp.runtime.instance import (
     TimeBaseInstanceConfig,
     TimeBaseInstanceRuntime,
 )
@@ -19,7 +22,6 @@ ClientOutcome = str | Exception
 @dataclass
 class ClientState:
     opened_editions: list[Edition] = field(default_factory=list)
-    read_only_attempts: list[tuple[Edition, bool]] = field(default_factory=list)
     outcomes: dict[Edition, ClientOutcome] = field(
         default_factory=lambda: {
             "enterprise": "enterprise-db",
@@ -33,18 +35,17 @@ class StubTimeBaseClient(TimeBaseClient):
 
     def __init__(
         self,
-        settings: TimeBaseInstanceConfig,
+        instance: TimeBaseInstanceRuntime,
         *,
         state: ClientState,
         edition: Edition,
-        read_only: bool = False,
     ) -> None:
-        super().__init__(settings, read_only=read_only)
+        super().__init__(instance)
         self.edition = edition
-        self.read_only = read_only
         self._state = state
         self._is_open = False
 
+    @override
     def open(self) -> str:
         if self._is_open:
             return f"{self.edition}-db"
@@ -56,37 +57,55 @@ class StubTimeBaseClient(TimeBaseClient):
         self._is_open = True
         return str(outcome)
 
+    @override
     def close(self) -> None:
         self._is_open = False
 
-    def _require_db(self) -> str:
+    @override
+    def require_db(self) -> str:
         if not self._is_open:
             return self.open()
         return f"{self.edition}-db"
 
+    @override
     def get_stream(self, stream_key: str) -> object:
         raise NotImplementedError
 
-    def _get_stream_schema_text(self, stream: object) -> str:
+    @override
+    def get_stream_schema_text(self, stream: object) -> str:
         raise NotImplementedError
 
-    def _list_stream_symbols(self, stream: object) -> list[str]:
+    @override
+    def list_stream_symbols(self, stream: object) -> list[str]:
         raise NotImplementedError
 
-    def _get_stream_time_range_ms(self, stream: object) -> list[int] | None:
+    @override
+    def list_stream_infos(self) -> list[StreamInfo]:
         raise NotImplementedError
 
-    def _list_stream_spaces(self, stream: object) -> list[str] | None:
-        raise NotImplementedError
-
-    def _get_stream_space_time_range_ms(
+    @override
+    def get_stream_time_range(
         self,
+        stream_key: str,
+        stream: object,
+    ) -> tuple[datetime | None, datetime | None]:
+        raise NotImplementedError
+
+    @override
+    def list_stream_spaces(self, stream: object) -> list[str] | None:
+        raise NotImplementedError
+
+    @override
+    def get_stream_space_time_range(
+        self,
+        stream_key: str,
         stream: object,
         space: str,
-    ) -> list[int] | None:
+    ) -> tuple[datetime | None, datetime | None]:
         raise NotImplementedError
 
-    def _read_stream_messages(
+    @override
+    def read_stream_messages(
         self,
         stream: object,
         reverse: bool,
@@ -95,12 +114,14 @@ class StubTimeBaseClient(TimeBaseClient):
     ) -> list[dict[str, object]]:
         raise NotImplementedError
 
-    def _read_query_messages(
+    @override
+    def read_query_messages(
         self, query_text: str, limit: int
     ) -> list[dict[str, object]]:
         raise NotImplementedError
 
-    def _compile_query_tokens(self, query_text: str) -> list[object]:
+    @override
+    def compile_query_tokens(self, query_text: str) -> list[object]:
         raise NotImplementedError
 
 
@@ -148,17 +169,13 @@ def patch_create_client(
     client_state: ClientState,
 ) -> None:
     def fake_create_client(
-        config: TimeBaseInstanceConfig,
+        instance: TimeBaseInstanceRuntime,
         edition: Edition,
-        *,
-        read_only: bool,
     ) -> StubTimeBaseClient:
-        client_state.read_only_attempts.append((edition, read_only))
         return StubTimeBaseClient(
-            config,
+            instance,
             state=client_state,
             edition=edition,
-            read_only=read_only,
         )
 
     monkeypatch.setattr(factory, "_create_client_for_edition", fake_create_client)
@@ -294,9 +311,7 @@ def test_create_timebase_client_prefers_enterprise_when_both_clients_connect(
 
     assert isinstance(client, StubTimeBaseClient)
     assert client.edition == "enterprise"
-    assert client.read_only is False
     assert harness.client_state.opened_editions == ["enterprise"]
-    assert harness.client_state.read_only_attempts == [("enterprise", False)]
     assert harness.instance.resolved_edition == "enterprise"
 
 
@@ -333,12 +348,7 @@ def test_create_timebase_client_falls_back_on_known_protocol_mismatch(
 
     assert isinstance(client, StubTimeBaseClient)
     assert client.edition == "community"
-    assert client.read_only is False
     assert harness.client_state.opened_editions == ["enterprise", "community"]
-    assert harness.client_state.read_only_attempts == [
-        ("enterprise", False),
-        ("community", False),
-    ]
     assert harness.instance.resolved_edition == "community"
 
 
@@ -369,7 +379,6 @@ def test_create_timebase_client_raises_missing_dependency_for_alternate_edition(
         factory.create_timebase_client(harness.instance)
 
     assert harness.client_state.opened_editions == ["enterprise"]
-    assert harness.client_state.read_only_attempts == [("enterprise", False)]
 
 
 def test_create_timebase_client_does_not_fallback_on_generic_connection_error(
@@ -389,7 +398,6 @@ def test_create_timebase_client_does_not_fallback_on_generic_connection_error(
         factory.create_timebase_client(harness.instance)
 
     assert harness.client_state.opened_editions == ["enterprise"]
-    assert harness.client_state.read_only_attempts == [("enterprise", False)]
 
 
 @pytest.mark.parametrize(
@@ -428,9 +436,7 @@ def test_create_timebase_client_uses_cached_detected_edition(
 
     assert isinstance(client, StubTimeBaseClient)
     assert client.edition == "community"
-    assert client.read_only is False
     assert harness.client_state.opened_editions == ["community"]
-    assert harness.client_state.read_only_attempts == [("community", False)]
 
 
 def patch_dependency_metadata(
@@ -574,7 +580,6 @@ def test_create_client_for_edition_validates_before_loading_client_class(
 
     with pytest.raises(ConfigurationError, match="incompatible dependency"):
         factory._create_client_for_edition(
-            build_instance_config(),
+            build_instance_runtime(),
             "enterprise",
-            read_only=True,
         )

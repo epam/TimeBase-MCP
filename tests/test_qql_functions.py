@@ -1,48 +1,83 @@
+from __future__ import annotations
+
+from datetime import datetime
 from typing import Any
 
+from typing_extensions import override
+
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.instance import TimeBaseInstanceConfig
-from timebase_mcp.qql_functions import normalize_qql_functions
+from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
+from timebase_mcp.models.core import StreamInfo
+from timebase_mcp.runtime.instance import (
+    TimeBaseInstanceConfig,
+    TimeBaseInstanceRuntime,
+)
+from timebase_mcp.services.qql_functions import normalize_qql_functions
+from timebase_mcp.services.queries import list_qql_functions
 
 
 class StubQQLFunctionsClient(TimeBaseClient):
     def __init__(self, messages_by_query: dict[str, list[dict[str, Any]]]) -> None:
-        super().__init__(TimeBaseInstanceConfig(tb_url="dxtick://localhost:8011"))
+        super().__init__(
+            TimeBaseInstanceRuntime(
+                key=DEFAULT_INSTANCE_KEY,
+                config=TimeBaseInstanceConfig(tb_url="dxtick://localhost:8011"),
+            )
+        )
         self.messages_by_query = messages_by_query
         self.executed_queries: list[str] = []
 
+    @override
     def open(self) -> object:
         return object()
 
+    @override
     def close(self) -> None:
         return None
 
-    def _require_db(self) -> object:
+    @override
+    def require_db(self) -> object:
         return object()
 
+    @override
     def get_stream(self, stream_key: str) -> object:
         raise NotImplementedError
 
-    def _get_stream_schema_text(self, stream: object) -> str:
+    @override
+    def get_stream_schema_text(self, stream: object) -> str:
         raise NotImplementedError
 
-    def _list_stream_symbols(self, stream: object) -> list[str]:
+    @override
+    def list_stream_symbols(self, stream: object) -> list[str]:
         raise NotImplementedError
 
-    def _get_stream_time_range_ms(self, stream: object) -> list[int] | None:
+    @override
+    def list_stream_infos(self) -> list[StreamInfo]:
         raise NotImplementedError
 
-    def _list_stream_spaces(self, stream: object) -> list[str] | None:
-        raise NotImplementedError
-
-    def _get_stream_space_time_range_ms(
+    @override
+    def get_stream_time_range(
         self,
+        stream_key: str,
+        stream: object,
+    ) -> tuple[datetime | None, datetime | None]:
+        raise NotImplementedError
+
+    @override
+    def list_stream_spaces(self, stream: object) -> list[str] | None:
+        raise NotImplementedError
+
+    @override
+    def get_stream_space_time_range(
+        self,
+        stream_key: str,
         stream: object,
         space: str,
-    ) -> list[int] | None:
+    ) -> tuple[datetime | None, datetime | None]:
         raise NotImplementedError
 
-    def _read_stream_messages(
+    @override
+    def read_stream_messages(
         self,
         stream: object,
         reverse: bool,
@@ -51,11 +86,13 @@ class StubQQLFunctionsClient(TimeBaseClient):
     ) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def _read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:
+    @override
+    def read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:
         self.executed_queries.append(query_text)
         return self.messages_by_query[query_text]
 
-    def _compile_query_tokens(self, query_text: str) -> list[Any]:
+    @override
+    def compile_query_tokens(self, query_text: str) -> list[Any]:
         raise NotImplementedError
 
 
@@ -267,7 +304,7 @@ def test_list_qql_functions_can_filter_by_kind() -> None:
         }
     )
 
-    result = client.list_qql_functions("stateless")
+    result = list_qql_functions(client, "stateless")
 
     assert client.executed_queries == ["SELECT stateless_functions() AS FUNCS"]
     assert [function.id for function in result.stateless] == ["ABS"]
@@ -294,7 +331,7 @@ def test_list_qql_functions_filters_by_function_id_server_side() -> None:
         }
     )
 
-    result = client.list_qql_functions("stateful", function_id="SUM")
+    result = list_qql_functions(client, "stateful", function_id="SUM")
 
     assert client.executed_queries == [query]
     assert result.stateless == []
@@ -307,7 +344,7 @@ def test_list_qql_functions_escapes_function_id_filter() -> None:
     )
     client = StubQQLFunctionsClient({query: []})
 
-    result = client.list_qql_functions("stateless", function_id="O'HLC")
+    result = list_qql_functions(client, "stateless", function_id="O'HLC")
 
     assert client.executed_queries == [query]
     assert result.function_count == 0

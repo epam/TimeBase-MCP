@@ -16,9 +16,9 @@ from timebase_mcp.errors import (
     TimeBaseOperationStateError,
     TimeBaseOperationTimeoutError,
 )
-from timebase_mcp.instance import TimeBaseInstanceRuntime
-from timebase_mcp.pool import TimeBaseConnectionPool
-from timebase_mcp.runtime import TimeBaseRuntime
+from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
+from timebase_mcp.runtime.pool import TimeBaseConnectionPool
+from timebase_mcp.runtime.state import TimeBaseRuntime
 
 ResultT = TypeVar("ResultT")
 logger = logging.getLogger(__name__)

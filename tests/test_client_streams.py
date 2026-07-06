@@ -3,11 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import pytest
+from typing_extensions import override
 
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.errors import InvalidStreamTimeRangeError
-from timebase_mcp.instance import TimeBaseInstanceConfig
+from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
+from timebase_mcp.models.core import StreamInfo
+from timebase_mcp.runtime.instance import (
+    TimeBaseInstanceConfig,
+    TimeBaseInstanceRuntime,
+)
+from timebase_mcp.services import streams as stream_service
 
 
 class StubStream:
@@ -25,43 +30,80 @@ class StubStream:
 
 class StubClient(TimeBaseClient):
     def __init__(self, stream: StubStream) -> None:
-        super().__init__(TimeBaseInstanceConfig(tb_url="dxtick://localhost:8011"))
+        super().__init__(
+            TimeBaseInstanceRuntime(
+                key=DEFAULT_INSTANCE_KEY,
+                config=TimeBaseInstanceConfig(tb_url="dxtick://localhost:8011"),
+            )
+        )
         self.stream = stream
         self.read_messages_calls: list[tuple[bool, int, str | None]] = []
 
+    @override
     def open(self) -> object:
         return object()
 
+    @override
     def close(self) -> None:
         pass
 
-    def _require_db(self) -> object:
+    @override
+    def require_db(self) -> object:
         return object()
 
+    @override
     def get_stream(self, stream_key: str) -> StubStream:
         assert stream_key == "bars"
         return self.stream
 
-    def _get_stream_schema_text(self, stream: Any) -> str:
+    @override
+    def get_stream_schema_text(self, stream: Any) -> str:
         return "schema"
 
-    def _list_stream_symbols(self, stream: Any) -> list[str]:
+    @override
+    def list_stream_symbols(self, stream: Any) -> list[str]:
         return []
 
-    def _get_stream_time_range_ms(self, stream: StubStream) -> list[int] | None:
-        return stream.time_range
+    @override
+    def list_stream_infos(self) -> list[StreamInfo]:
+        return []
 
-    def _list_stream_spaces(self, stream: StubStream) -> list[str] | None:
+    @override
+    def get_stream_time_range(
+        self,
+        stream_key: str,
+        stream: StubStream,
+    ) -> tuple[datetime | None, datetime | None]:
+        if stream.time_range is None:
+            return None, None
+        start_ms, end_ms = stream.time_range
+        return (
+            datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc),
+            datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc),
+        )
+
+    @override
+    def list_stream_spaces(self, stream: StubStream) -> list[str] | None:
         return stream.spaces
 
-    def _get_stream_space_time_range_ms(
+    @override
+    def get_stream_space_time_range(
         self,
+        stream_key: str,
         stream: StubStream,
         space: str,
-    ) -> list[int] | None:
-        return stream.space_time_ranges.get(space)
+    ) -> tuple[datetime | None, datetime | None]:
+        time_range = stream.space_time_ranges.get(space)
+        if time_range is None:
+            return None, None
+        start_ms, end_ms = time_range
+        return (
+            datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc),
+            datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc),
+        )
 
-    def _read_stream_messages(
+    @override
+    def read_stream_messages(
         self,
         stream: Any,
         reverse: bool,
@@ -71,17 +113,19 @@ class StubClient(TimeBaseClient):
         self.read_messages_calls.append((reverse, count, space))
         return [{"symbol": "AAPL"}]
 
-    def _read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:
+    @override
+    def read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:
         return []
 
-    def _compile_query_tokens(self, query_text: str) -> list[Any]:
+    @override
+    def compile_query_tokens(self, query_text: str) -> list[Any]:
         return []
 
 
 def test_get_stream_time_range_returns_utc_datetimes() -> None:
     client = StubClient(StubStream(time_range=[1_700_000_000_000, 1_700_000_060_000]))
 
-    result = client.get_stream_time_range("bars")
+    result = stream_service.get_stream_time_range(client, "bars")
 
     assert result.stream_key == "bars"
     assert result.start == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
@@ -91,7 +135,7 @@ def test_get_stream_time_range_returns_utc_datetimes() -> None:
 def test_get_stream_spaces_reports_unsupported_when_dxapi_returns_none() -> None:
     client = StubClient(StubStream(spaces=None))
 
-    result = client.get_stream_spaces("bars")
+    result = stream_service.get_stream_spaces(client, "bars")
 
     assert result.stream_key == "bars"
     assert result.spaces == []
@@ -102,7 +146,7 @@ def test_get_stream_spaces_reports_unsupported_when_dxapi_returns_none() -> None
 def test_get_stream_spaces_preserves_default_space_and_sorts() -> None:
     client = StubClient(StubStream(spaces=["blue", "", "red"]))
 
-    result = client.get_stream_spaces("bars")
+    result = stream_service.get_stream_spaces(client, "bars")
 
     assert result.spaces == ["", "blue", "red"]
     assert result.returned_count == 3
@@ -118,7 +162,7 @@ def test_get_stream_space_time_range_returns_utc_datetimes() -> None:
         )
     )
 
-    result = client.get_stream_space_time_range("bars", "blue")
+    result = stream_service.get_stream_space_time_range(client, "bars", "blue")
 
     assert result.stream_key == "bars"
     assert result.space == "blue"
@@ -126,23 +170,12 @@ def test_get_stream_space_time_range_returns_utc_datetimes() -> None:
     assert result.end == datetime(2023, 11, 14, 22, 14, 20, tzinfo=timezone.utc)
 
 
-@pytest.mark.parametrize(
-    "time_range",
-    [[2, 1], [1, 2, 3]],
-)
-def test_get_stream_space_time_range_rejects_invalid_ranges(
-    time_range: list[int],
-) -> None:
-    client = StubClient(StubStream(space_time_ranges={"blue": time_range}))
-
-    with pytest.raises(InvalidStreamTimeRangeError):
-        client.get_stream_space_time_range("bars", "blue")
-
-
 def test_get_stream_messages_text_passes_space_to_reader() -> None:
     client = StubClient(StubStream(spaces=["blue"]))
 
-    text = client.get_stream_messages_text("bars", reverse=True, count=1, space="blue")
+    text = stream_service.get_stream_messages_text(
+        client, "bars", reverse=True, count=1, space="blue"
+    )
 
     assert client.read_messages_calls == [(True, 1, "blue")]
     assert "Stream: bars" in text

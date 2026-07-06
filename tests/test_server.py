@@ -1,8 +1,9 @@
+import logging
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-import logging
 
+import httpx
 import pytest
 from inline_snapshot import snapshot
 from mcp.client.session import ClientSession
@@ -13,28 +14,26 @@ from pydantic import AnyUrl, SecretStr, TypeAdapter
 
 from timebase_mcp import resources as resources_module
 from timebase_mcp.clients import factory as client_factory
-from timebase_mcp.config import MCPSettings, SettingsEnv
+from timebase_mcp.config.env import SettingsEnv
+from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import (
     TimeBaseOperationError,
     TimeBaseOperationLimitError,
     TimeBaseOperationTimeoutError,
 )
-from timebase_mcp.models import StreamInfo
-from timebase_mcp.runtime import build_runtime, build_server_configuration
+from timebase_mcp.models.core import StreamInfo
+from timebase_mcp.runtime.introspection import build_server_configuration
+from timebase_mcp.runtime.state import build_runtime
 from timebase_mcp.server import create_server
 from timebase_mcp.tools import queries as query_tools
 from timebase_mcp.tools import streams as stream_tools
+from timebase_mcp.version import get_version
 
 
 @dataclass
 class _StubStream:
     key: str
     description: str | None = None
-
-
-@dataclass
-class _StubSchema:
-    schema_text: str
 
 
 _RESOURCE_URI_ADAPTER = TypeAdapter(AnyUrl)
@@ -201,11 +200,14 @@ async def test_read_resources_return_expected_text(
         selected_instances.append(instance_key)
 
         class StubClient:
-            def list_streams(self) -> list[_StubStream]:
+            def list_stream_infos(self) -> list[_StubStream]:
                 return [_StubStream("bars", f"desc:{instance_key}")]
 
-            def get_stream_schema(self, stream_key: str) -> _StubSchema:
-                return _StubSchema(f"schema:{instance_key}:{stream_key}")
+            def get_stream(self, stream_key: str) -> str:
+                return stream_key
+
+            def get_stream_schema_text(self, stream: str) -> str:
+                return f"schema:{instance_key}:{stream}"
 
         return operation(StubClient())
 
@@ -316,7 +318,7 @@ async def test_read_instance_scoped_resource_uses_selected_instance_when_multipl
         selected_instances.append(instance_key)
 
         class StubClient:
-            def list_streams(self) -> list[_StubStream]:
+            def list_stream_infos(self) -> list[_StubStream]:
                 return [_StubStream("bars", f"from {instance_key}")]
 
         return operation(StubClient())
@@ -360,7 +362,7 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
         selected_instances.append(instance_key)
 
         class StubClient:
-            def list_streams(self) -> list[_StubStream]:
+            def list_stream_infos(self) -> list[_StubStream]:
                 return [_StubStream("bars", f"from {instance_key}")]
 
         return operation(StubClient())
@@ -503,35 +505,33 @@ async def test_call_stream_space_tools_pass_arguments(
         selected_instances.append(instance_key)
 
         class StubClient:
-            def get_stream_spaces(self, stream_key: str):
-                calls.append(("spaces", stream_key, None))
-                return {
-                    "stream_key": stream_key,
-                    "spaces": ["", "blue"],
-                    "returned_count": 2,
-                    "supports_spaces": True,
-                }
+            def get_stream(self, stream_key: str) -> str:
+                return stream_key
 
-            def get_stream_space_time_range(self, stream_key: str, space: str):
-                calls.append(("space_range", stream_key, space))
-                return {
-                    "stream_key": stream_key,
-                    "space": space,
-                    "start": None,
-                    "end": None,
-                }
+            def list_stream_spaces(self, stream: str):
+                calls.append(("spaces", stream, None))
+                return ["", "blue"]
 
-            def get_stream_messages_text(
+            def get_stream_space_time_range(
                 self,
                 stream_key: str,
+                stream: str,
+                space: str,
+            ):
+                calls.append(("space_range", stream_key, space))
+                return None, None
+
+            def read_stream_messages(
+                self,
+                stream: str,
                 reverse: bool,
                 count: int,
                 space: str | None = None,
-            ) -> str:
+            ) -> list[dict[str, str]]:
                 assert reverse is True
                 assert count == 3
-                calls.append(("messages", stream_key, space))
-                return f"messages:{stream_key}:{space}"
+                calls.append(("messages", stream, space))
+                return [{"text": f"messages:{stream}:{space}"}]
 
         return operation(StubClient())
 
@@ -637,6 +637,7 @@ async def test_call_get_server_configuration_tool(
     assert text_content == [
         (
             "{\n"
+            f'  "version": "{get_version()}",\n'
             '  "transport": "stdio",\n'
             '  "inbound_auth_mode": "none",\n'
             '  "principal": null,\n'
@@ -658,6 +659,7 @@ async def test_call_get_server_configuration_tool(
         )
     ]
     assert result.structuredContent == {
+        "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
         "principal": None,
@@ -749,6 +751,19 @@ async def test_call_get_server_configuration_reports_inbound_auth_mode() -> None
     assert configuration.inbound_auth_mode == "jwt"
 
 
+def test_build_server_configuration_reports_configured_http_url_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DXAPI_SSL_TERMINATION", raising=False)
+    monkeypatch.delenv("DXAPI_SSL_TRUST_ALL", raising=False)
+
+    configuration = build_server_configuration(
+        build_runtime(MCPSettings(tb_http_url="http://localhost:8021"))
+    )
+
+    assert configuration.timebase_instances[0].http_url == "http://localhost:8021"
+
+
 @pytest.mark.anyio
 async def test_call_get_server_configuration_tool_reports_detected_edition(
     client_session_factory,
@@ -763,6 +778,7 @@ async def test_call_get_server_configuration_tool_reports_detected_edition(
         result = await client_session.call_tool("get_server_configuration", {})
 
     assert result.structuredContent == {
+        "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
         "principal": None,
@@ -801,6 +817,7 @@ async def test_call_get_server_configuration_tool_reports_enterprise_for_oauth2(
         result = await client_session.call_tool("get_server_configuration", {})
 
     assert result.structuredContent == {
+        "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
         "principal": None,
@@ -838,6 +855,7 @@ async def test_call_get_server_configuration_tool_sanitizes_url_credentials(
         result = await client_session.call_tool("get_server_configuration", {})
 
     assert result.structuredContent == {
+        "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
         "principal": None,
@@ -911,32 +929,35 @@ async def test_call_list_qql_functions_tool_returns_structured_payload(
 
     async def run_list_qql_functions(_ctx, operation, *, instance_key=None):
         selected_instances.append(instance_key)
+        return operation(object())
 
-        class StubClient:
-            def list_qql_functions(self, kind: str, function_id: str | None = None):
-                selected_kinds.append(kind)
-                selected_function_ids.append(function_id)
-                return {
-                    "stateless": [
-                        {
-                            "id": "MAX",
-                            "signatures": [
-                                "MAX(x: INTEGER(INT64), y: INTEGER(INT64)) -> INTEGER(INT64)?"
-                            ],
-                            "overload_count": 1,
-                        }
+    def list_qql_functions(client, kind: str, function_id: str | None = None):
+        selected_kinds.append(kind)
+        selected_function_ids.append(function_id)
+        return {
+            "stateless": [
+                {
+                    "id": "MAX",
+                    "signatures": [
+                        "MAX(x: INTEGER(INT64), y: INTEGER(INT64)) -> INTEGER(INT64)?"
                     ],
-                    "stateful": [],
-                    "function_count": 1,
                     "overload_count": 1,
                 }
-
-        return operation(StubClient())
+            ],
+            "stateful": [],
+            "function_count": 1,
+            "overload_count": 1,
+        }
 
     monkeypatch.setattr(
         query_tools,
         "run_with_context",
         run_list_qql_functions,
+    )
+    monkeypatch.setattr(
+        query_tools.query_service,
+        "list_qql_functions",
+        list_qql_functions,
     )
 
     async with client_session_factory(None) as client_session:

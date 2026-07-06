@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from timebase_mcp.auth import keystore
-from timebase_mcp.main import _keys_generate, _keys_list, _keys_revoke
+from timebase_mcp.cli.keys import keys_generate, keys_list, keys_revoke
 
 
 def test_hash_key_format() -> None:
@@ -221,7 +221,7 @@ def test_cli_generate_writes_to_file(
     path = tmp_path / "keys.json"
     args = _args(name="alice", scopes="timebase.read", file=str(path), stdout=False)
 
-    exit_code = _keys_generate(args)
+    exit_code = keys_generate(args)
 
     assert exit_code == 0
     records = keystore.load_store(path)
@@ -237,7 +237,7 @@ def test_cli_generate_stdout_emits_json_and_key(
 ) -> None:
     args = _args(name="ci", scopes=None, file=None, stdout=True)
 
-    exit_code = _keys_generate(args)
+    exit_code = keys_generate(args)
 
     assert exit_code == 0
     captured = capsys.readouterr()
@@ -252,7 +252,7 @@ def test_cli_list_shows_records(tmp_path: Path, capsys: pytest.CaptureFixture) -
     r, _ = keystore.build_record(name="alice", scopes=["timebase.read"])
     keystore.write_store(path, [r])
 
-    exit_code = _keys_list(_args(file=str(path)))
+    exit_code = keys_list(_args(file=str(path)))
 
     assert exit_code == 0
     out = capsys.readouterr().out
@@ -263,14 +263,14 @@ def test_cli_list_shows_records(tmp_path: Path, capsys: pytest.CaptureFixture) -
 def test_cli_list_empty_store(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     args = _args(file=str(tmp_path / "keys.json"))
 
-    exit_code = _keys_list(args)
+    exit_code = keys_list(args)
 
     assert exit_code == 0
     assert "No API keys" in capsys.readouterr().out
 
 
 def test_cli_list_no_file_specified(capsys: pytest.CaptureFixture) -> None:
-    exit_code = _keys_list(_args(file=None))
+    exit_code = keys_list(_args(file=None))
 
     assert exit_code == 2
 
@@ -280,7 +280,7 @@ def test_cli_revoke_removes_key(tmp_path: Path, capsys: pytest.CaptureFixture) -
     r, _ = keystore.build_record(name="alice", scopes=[])
     keystore.write_store(path, [r])
 
-    exit_code = _keys_revoke(_args(identifier="alice", file=str(path)))
+    exit_code = keys_revoke(_args(identifier="alice", file=str(path)))
 
     assert exit_code == 0
     assert keystore.load_store(path) == ()
@@ -293,12 +293,12 @@ def test_cli_revoke_unknown_returns_nonzero(
     r, _ = keystore.build_record(name="alice", scopes=[])
     keystore.write_store(path, [r])
 
-    exit_code = _keys_revoke(_args(identifier="nobody", file=str(path)))
+    exit_code = keys_revoke(_args(identifier="nobody", file=str(path)))
 
     assert exit_code == 1
 
 
 def test_cli_revoke_no_file_specified() -> None:
-    exit_code = _keys_revoke(_args(identifier="alice", file=None))
+    exit_code = keys_revoke(_args(identifier="alice", file=None))
 
     assert exit_code == 2

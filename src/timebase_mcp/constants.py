@@ -11,4 +11,7 @@ DEFAULT_INSTANCE_KEY = "default"
 # ``forward_identity`` partitions an instance's pool per authenticated principal.
 SHARED_PRINCIPAL_KEY = "__shared__"
 
+# Per-principal pools do not keep warm idle TimeBase connections between requests.
+FORWARD_IDENTITY_MAX_IDLE_CLIENTS = 0
+
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"})

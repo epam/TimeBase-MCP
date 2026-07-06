@@ -1,9 +1,15 @@
+from typing import Literal
+
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
-from timebase_mcp.models import MCPServerConfiguration, TimeBaseInstanceInfo
-from timebase_mcp.runtime import TimeBaseRuntime, build_server_configuration
+from timebase_mcp.models.core import MCPServerConfiguration, TimeBaseInstanceInfo
+from timebase_mcp.runtime.introspection import build_server_configuration
+from timebase_mcp.runtime.state import TimeBaseRuntime
+from timebase_mcp.tools.common import InstanceName
+
 
 
 def register_system_tools(mcp: FastMCP) -> None:

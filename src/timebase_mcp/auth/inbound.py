@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 
-from timebase_mcp.auth.discovery import (
-    derive_http_base_urls,
-    resolve_inbound_auth,
-)
+from timebase_mcp.auth.discovery import resolve_inbound_auth
 from timebase_mcp.auth.keystore import KeyStore
 from timebase_mcp.auth.settings import build_auth_settings
 from timebase_mcp.auth.token_verifier import ApiKeyStoreVerifier, JwksTokenVerifier
-from timebase_mcp.config import MCPSettings
+from timebase_mcp.config.settings import MCPSettings
+
+if TYPE_CHECKING:
+    from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +31,10 @@ def _public_url(settings: MCPSettings) -> str:
     return f"http://{settings.host}:{settings.port}"
 
 
-def _discovery_base_url(settings: MCPSettings) -> str | tuple[str, ...] | None:
-    servers = settings.resolve_servers()
-    default_key = settings.resolved_default_instance_key
-    ordered = sorted(servers, key=lambda server: server.instance_key != default_key)
-    for server in ordered:
-        base = server.http_base_url or derive_http_base_urls(server.url)
-        if base:
-            return base
-    return None
-
-
-def build_inbound_auth(settings: MCPSettings) -> InboundAuth | None:
+def build_inbound_auth(
+    settings: MCPSettings,
+    instance: TimeBaseInstanceRuntime | None = None,
+) -> InboundAuth | None:
     """Build inbound Resource Server auth, or ``None`` when disabled.
 
     Inbound auth is only meaningful for HTTP transports; the caller is expected
@@ -70,7 +63,7 @@ def build_inbound_auth(settings: MCPSettings) -> InboundAuth | None:
     resolved = resolve_inbound_auth(
         issuer_override=settings.auth_issuer_url,
         jwks_override=settings.auth_jwks_url,
-        discovery_base_url=_discovery_base_url(settings),
+        instance=instance,
     )
     logger.info(
         "Inbound auth enabled (Resource Server). issuer=%s jwks=%s",

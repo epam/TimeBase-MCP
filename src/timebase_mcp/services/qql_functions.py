@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from itertools import zip_longest
 from typing import Any, Literal
 
-from timebase_mcp.models import QQLFunctionGroup
+from timebase_mcp.models.core import QQLFunctionGroup
 
 QQLFunctionKind = Literal["stateless", "stateful"]
 QQL_FUNCTIONS_FIELD = "FUNCS"
