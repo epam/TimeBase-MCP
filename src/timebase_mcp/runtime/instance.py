@@ -12,10 +12,19 @@ from pydantic import SecretStr
 from timebase_mcp.auth.oauth2 import (
     OAuth2AccessTokenProvider,
     OAuth2ClientCredentialsConfig,
+    get_oauth2_provider,
 )
-from timebase_mcp.config import Edition, InboundAuthMode, OutboundAuthMode, ServerConfig
-from timebase_mcp.constants import DEFAULT_INSTANCE_KEY, SHARED_PRINCIPAL_KEY
-from timebase_mcp.pool import TimeBaseConnectionPool, TimeBaseOperationBudget
+from timebase_mcp.config.servers import ServerConfig
+from timebase_mcp.config.types import (
+    Edition,
+    InboundAuthMode,
+    OutboundAuthMode,
+)
+from timebase_mcp.constants import (
+    FORWARD_IDENTITY_MAX_IDLE_CLIENTS,
+    SHARED_PRINCIPAL_KEY,
+)
+from timebase_mcp.runtime.pool import TimeBaseConnectionPool, TimeBaseOperationBudget
 
 if TYPE_CHECKING:
     from timebase_mcp.clients.base import TimeBaseClient
@@ -28,7 +37,6 @@ DEFAULT_MAX_PRINCIPAL_POOLS = 64
 DEFAULT_PRINCIPAL_IDLE_TTL_SECONDS = 300.0
 
 __all__ = [
-    "DEFAULT_INSTANCE_KEY",
     "DEFAULT_MAX_PRINCIPAL_POOLS",
     "DEFAULT_PRINCIPAL_IDLE_TTL_SECONDS",
     "TimeBaseInstanceConfig",
@@ -150,6 +158,8 @@ class TimeBaseInstanceRuntime:
         default_factory=TimeBaseOperationBudget,
         repr=False,
     )
+    shared_max_idle_clients: int = 1
+    forward_identity_max_idle_clients: int = FORWARD_IDENTITY_MAX_IDLE_CLIENTS
     max_principal_pools: int = DEFAULT_MAX_PRINCIPAL_POOLS
     principal_idle_ttl_seconds: float = DEFAULT_PRINCIPAL_IDLE_TTL_SECONDS
     interactive_provider: OAuth2AccessTokenProvider | None = field(
@@ -157,6 +167,12 @@ class TimeBaseInstanceRuntime:
         init=False,
         repr=False,
     )
+    oauth2_provider: OAuth2AccessTokenProvider | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    resolved_http_base_url: str | None = field(default=None, init=False)
     _principal_pools: dict[str, _PrincipalPool] = field(
         default_factory=dict,
         init=False,
@@ -173,6 +189,9 @@ class TimeBaseInstanceRuntime:
         entry = self._principal_pools.get(SHARED_PRINCIPAL_KEY)
         return entry.pool if entry is not None else None
 
+    def clear_http_base_url(self) -> None:
+        self.resolved_http_base_url = None
+
     def get_connection_pool(self) -> TimeBaseConnectionPool["TimeBaseClient"]:
         """Return the shared, process-identity connection pool."""
         entry = self._principal_pools.get(SHARED_PRINCIPAL_KEY)
@@ -183,6 +202,7 @@ class TimeBaseInstanceRuntime:
             self.key,
             self.open_client,
             self.operation_budget,
+            max_idle_clients=self.shared_max_idle_clients,
         )
         self._principal_pools[SHARED_PRINCIPAL_KEY] = _PrincipalPool(
             pool=pool,
@@ -218,6 +238,7 @@ class TimeBaseInstanceRuntime:
             self.key,
             self._make_forwarded_creator(identity),
             self.operation_budget,
+            max_idle_clients=self.forward_identity_max_idle_clients,
         )
         self._principal_pools[principal_key] = _PrincipalPool(
             pool=pool,
@@ -230,23 +251,17 @@ class TimeBaseInstanceRuntime:
     def open_client(self) -> "TimeBaseClient":
         from timebase_mcp.clients.factory import create_timebase_client
 
-        return create_timebase_client(self, read_only=False)
+        return create_timebase_client(self)
 
     def _make_forwarded_creator(self, identity: _ForwardedIdentity):
-        instance = self
-
         def create() -> "TimeBaseClient":
             from timebase_mcp.clients.factory import create_timebase_client
 
-            connection_config = instance.config.with_access_token(
-                identity.token,
-                identity.username,
+            forwarded = dataclasses.replace(
+                self,
+                config=self.config.with_access_token(identity.token, identity.username),
             )
-            return create_timebase_client(
-                instance,
-                read_only=False,
-                config=connection_config,
-            )
+            return create_timebase_client(forwarded)
 
         return create
 
@@ -255,10 +270,18 @@ class TimeBaseInstanceRuntime:
             from timebase_mcp.auth.interactive import build_interactive_provider
 
             self.interactive_provider = build_interactive_provider(
-                self.config,
+                self,
                 redirect_uri=self.interactive_redirect_uri,
             )
         return self.interactive_provider
+
+    def get_oauth2_provider(
+        self,
+        config: OAuth2ClientCredentialsConfig,
+    ) -> OAuth2AccessTokenProvider:
+        if self.oauth2_provider is None:
+            self.oauth2_provider = get_oauth2_provider(config)
+        return self.oauth2_provider
 
     def _evict_principal_pools(self, now: float) -> None:
         principal_keys = [

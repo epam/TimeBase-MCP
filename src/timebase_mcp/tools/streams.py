@@ -3,7 +3,7 @@ from mcp.server.session import ServerSession
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from timebase_mcp.models import (
+from timebase_mcp.models.core import (
     StreamInfo,
     StreamSchema,
     StreamSpaces,
@@ -11,8 +11,9 @@ from timebase_mcp.models import (
     StreamSymbols,
     StreamTimeRange,
 )
-from timebase_mcp.operations import run_with_context
-from timebase_mcp.runtime import TimeBaseRuntime
+from timebase_mcp.runtime.operations import run_with_context
+from timebase_mcp.services import streams as stream_service
+from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.tools.common import InstanceName
 
 
@@ -33,7 +34,7 @@ def register_stream_tools(mcp: FastMCP) -> None:
     ) -> list[StreamInfo]:
         return await run_with_context(
             ctx,
-            lambda client: client.list_streams(),
+            lambda client: stream_service.list_streams(client),
             instance_key=instance_key,
         )
 
@@ -53,7 +54,7 @@ def register_stream_tools(mcp: FastMCP) -> None:
     ) -> StreamSchema:
         return await run_with_context(
             ctx,
-            lambda client: client.get_stream_schema(stream_key),
+            lambda client: stream_service.get_stream_schema(client, stream_key),
             instance_key=instance_key,
         )
 
@@ -73,7 +74,7 @@ def register_stream_tools(mcp: FastMCP) -> None:
     ) -> StreamTimeRange:
         return await run_with_context(
             ctx,
-            lambda client: client.get_stream_time_range(stream_key),
+            lambda client: stream_service.get_stream_time_range(client, stream_key),
             instance_key=instance_key,
         )
 
@@ -93,7 +94,7 @@ def register_stream_tools(mcp: FastMCP) -> None:
     ) -> StreamSpaces:
         return await run_with_context(
             ctx,
-            lambda client: client.get_stream_spaces(stream_key),
+            lambda client: stream_service.get_stream_spaces(client, stream_key),
             instance_key=instance_key,
         )
 
@@ -116,7 +117,9 @@ def register_stream_tools(mcp: FastMCP) -> None:
     ) -> StreamSpaceTimeRange:
         return await run_with_context(
             ctx,
-            lambda client: client.get_stream_space_time_range(stream_key, space),
+            lambda client: stream_service.get_stream_space_time_range(
+                client, stream_key, space
+            ),
             instance_key=instance_key,
         )
 
@@ -148,7 +151,8 @@ def register_stream_tools(mcp: FastMCP) -> None:
     ) -> StreamSymbols:
         return await run_with_context(
             ctx,
-            lambda client: client.get_stream_symbols(
+            lambda client: stream_service.get_stream_symbols(
+                client,
                 stream_key=stream_key,
                 limit=limit,
                 cursor=cursor,
@@ -186,7 +190,8 @@ def register_stream_tools(mcp: FastMCP) -> None:
     ) -> str:
         return await run_with_context(
             ctx,
-            lambda client: client.get_stream_messages_text(
+            lambda client: stream_service.get_stream_messages_text(
+                client,
                 stream_key,
                 reverse,
                 count,

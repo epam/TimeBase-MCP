@@ -1,23 +1,21 @@
 import importlib.util
 import logging
-import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from importlib import import_module, metadata
 from typing import cast
-from urllib.parse import urlparse
 
 from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
-from timebase_mcp.auth.discovery import (
-    derive_http_base_urls,
-    resolve_interactive_endpoints,
-)
+from timebase_mcp.auth.outbound import resolve_auto_auth_config
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.config import Edition, OutboundAuthMode
 from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
-from timebase_mcp.instance import TimeBaseInstanceConfig, TimeBaseInstanceRuntime
+from timebase_mcp.runtime.instance import (
+    TimeBaseInstanceConfig,
+    TimeBaseInstanceRuntime,
+)
+from timebase_mcp.config.types import Edition
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +43,7 @@ _EDITION_INFO: dict[Edition, _EditionInfo] = {
         module_name="dxapi",
         distribution_name="dxapi-ee",
         extra_name="timebase-mcp[enterprise]",
-        client_module="timebase_mcp.clients.enterprise",
+        client_module="timebase_mcp.clients.native.enterprise",
         client_class="EnterpriseTimeBaseClient",
     ),
     "community": _EditionInfo(
@@ -53,7 +51,7 @@ _EDITION_INFO: dict[Edition, _EditionInfo] = {
         module_name="dxapi_ce",
         distribution_name="dxapi-ce",
         extra_name="timebase-mcp[community]",
-        client_module="timebase_mcp.clients.community",
+        client_module="timebase_mcp.clients.native.community",
         client_class="CommunityTimeBaseClient",
     ),
 }
@@ -71,12 +69,9 @@ class _DependencyStatus:
 
 def create_timebase_client(
     instance: TimeBaseInstanceRuntime,
-    *,
-    read_only: bool = False,
-    config: TimeBaseInstanceConfig | None = None,
 ) -> TimeBaseClient:
-    config = config or instance.config
-    config = _resolve_auto_auth_config(instance, config)
+    config = instance.config
+    config = resolve_auto_auth_config(instance, config)
 
     if config.requires_enterprise_client:
         instance.resolved_edition = "enterprise"
@@ -89,11 +84,9 @@ def create_timebase_client(
             config.tb_url,
         )
         client = _create_client_for_edition(
-            config,
+            instance,
             detected_edition,
-            read_only=read_only,
         )
-        _attach_interactive_provider(instance, client, config)
         try:
             client.open()
         except Exception:
@@ -115,9 +108,7 @@ def create_timebase_client(
 
     return _create_auto_detected_client(
         instance,
-        read_only=read_only,
         available_editions=available_editions,
-        config=config,
     )
 
 
@@ -135,35 +126,17 @@ def get_detected_edition(instance: TimeBaseInstanceRuntime) -> Edition | None:
     return None
 
 
-def _attach_interactive_provider(
-    instance: TimeBaseInstanceRuntime,
-    client: TimeBaseClient,
-    config: TimeBaseInstanceConfig,
-) -> None:
-    if config.auth_mode != "interactive":
-        return
-
-    setter = getattr(client, "set_token_provider", None)
-    if callable(setter):
-        setter(instance.get_interactive_provider())
-
-
 def _create_auto_detected_client(
     instance: TimeBaseInstanceRuntime,
     *,
-    read_only: bool,
     available_editions: tuple[Edition, ...],
-    config: TimeBaseInstanceConfig | None = None,
 ) -> TimeBaseClient:
-    config = config or instance.config
+    config = instance.config
     preferred_edition = available_editions[0]
     client = _create_client_for_edition(
-        config,
+        instance,
         preferred_edition,
-        read_only=read_only,
     )
-    _attach_interactive_provider(instance, client, config)
-
     try:
         client.open()
     except TimeBaseConnectionError as exc:
@@ -184,11 +157,9 @@ def _create_auto_detected_client(
         )
 
         client = _create_client_for_edition(
-            config,
+            instance,
             fallback_edition,
-            read_only=read_only,
         )
-        _attach_interactive_provider(instance, client, config)
         client.open()
         preferred_edition = fallback_edition
     except Exception as exc:
@@ -205,12 +176,10 @@ def _create_auto_detected_client(
 
 
 def _create_client_for_edition(
-    config: TimeBaseInstanceConfig,
+    instance: TimeBaseInstanceRuntime,
     edition: Edition,
-    *,
-    read_only: bool,
 ) -> TimeBaseClient:
-    logger.debug("Using %s client for %s", edition, config.tb_url)
+    logger.debug("Using %s client for %s", edition, instance.config.tb_url)
     status = _dependency_status(edition)
     if not status.installed:
         raise ConfigurationError(
@@ -220,124 +189,7 @@ def _create_client_for_edition(
         raise status.error
 
     client_class = _load_client_class(edition)
-    return client_class(config, read_only=read_only)
-
-
-def _resolve_auto_auth_config(
-    instance: TimeBaseInstanceRuntime,
-    config: TimeBaseInstanceConfig,
-) -> TimeBaseInstanceConfig:
-    if config.auth_mode != "auto":
-        return config
-
-    discovered_http_base_url, discovery_error = _discover_timebase_oauth_base_url(
-        config
-    )
-    resolved_mode = _select_auto_auth_mode(
-        instance,
-        config,
-        timebase_advertises_oauth=discovered_http_base_url is not None,
-    )
-    resolved_config = replace(
-        config,
-        auth_mode=resolved_mode,
-        http_base_url=discovered_http_base_url or config.http_base_url,
-        auto_auth_error=discovery_error,
-    )
-
-    if instance.config is config:
-        instance.config = resolved_config
-
-    logger.info(
-        "Resolved TimeBase auth_mode=auto for %s to %s.",
-        config.tb_url,
-        resolved_mode,
-    )
-    return resolved_config
-
-
-def _discover_timebase_oauth_base_url(
-    config: TimeBaseInstanceConfig,
-) -> tuple[str | None, str | None]:
-    discovery_base_url = config.http_base_url or derive_http_base_urls(config.tb_url)
-    try:
-        endpoints = resolve_interactive_endpoints(
-            discovery_base_url=discovery_base_url,
-            issuer_override=None,
-            client_id_override=config.tb_oauth2_client_id,
-            scope_override=config.tb_oauth2_scope,
-        )
-    except ConfigurationError as exc:
-        logger.info(
-            "TimeBase OAuth auto-discovery failed for %s. %s",
-            config.tb_url,
-            exc,
-        )
-        return None, str(exc)
-
-    _maybe_enable_ssl_termination(config.tb_url, endpoints.discovery_base_url)
-    return endpoints.discovery_base_url, None
-
-
-def _select_auto_auth_mode(
-    instance: TimeBaseInstanceRuntime,
-    config: TimeBaseInstanceConfig,
-    *,
-    timebase_advertises_oauth: bool,
-) -> OutboundAuthMode:
-    if config.tb_password is not None:
-        return "basic"
-
-    if config.oauth2_config is not None:
-        return "oauth2_client_credentials"
-
-    if timebase_advertises_oauth:
-        if (
-            instance.runtime_auth_enabled
-            and instance.runtime_is_http_transport
-            and instance.runtime_inbound_auth_mode == "jwt"
-        ):
-            return "forward_identity"
-
-        if instance.runtime_inbound_auth_mode == "api_key":
-            raise ConfigurationError(
-                "TimeBase advertises OAuth, but inbound MCP auth uses API keys. "
-                "API-key callers cannot be forwarded to TimeBase. Configure "
-                "TIMEBASE_AUTH_MODE=oauth2_client_credentials, basic, or none."
-            )
-
-        if instance.runtime_is_http_transport:
-            raise ConfigurationError(
-                "TimeBase advertises OAuth, but interactive login is only supported "
-                "for stdio transport. Configure TIMEBASE_AUTH_MODE=forward_identity, "
-                "oauth2_client_credentials, basic, or none."
-            )
-
-        return "interactive"
-
-    return "none"
-
-
-def _maybe_enable_ssl_termination(tb_url: str, discovery_base_url: str | None) -> None:
-    if os.environ.get("DXAPI_SSL_TERMINATION") is not None:
-        return
-    if discovery_base_url is None:
-        return
-
-    discovery = urlparse(discovery_base_url)
-    if discovery.scheme != "https":
-        return
-
-    tb = urlparse(tb_url)
-    tb_authority = tb.netloc.split("|", 1)[0]
-    if discovery.netloc != tb_authority:
-        return
-
-    os.environ["DXAPI_SSL_TERMINATION"] = "true"
-    logger.info(
-        "Enabled DXAPI_SSL_TERMINATION=true because TimeBase OAuth discovery "
-        "succeeded over HTTPS on the dxtick endpoint."
-    )
+    return client_class(instance)
 
 
 def _load_client_class(edition: Edition) -> type[TimeBaseClient]:

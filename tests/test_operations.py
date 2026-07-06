@@ -1,14 +1,16 @@
-import logging
 import asyncio
-import pytest
+import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable
 from typing import cast
 
-import timebase_mcp.operations as operations_module
+import pytest
+from typing_extensions import override
+
+import timebase_mcp.runtime.operations as operations_module
 from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.config import MCPSettings
+from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import (
     TimeBaseConnectionError,
     TimeBaseOperationError,
@@ -16,17 +18,16 @@ from timebase_mcp.errors import (
     TimeBaseOperationStateError,
     TimeBaseOperationTimeoutError,
 )
-from timebase_mcp.operations import run_with_runtime
-from timebase_mcp.pool import TimeBaseConnectionPool, TimeBaseOperationBudget
-from timebase_mcp.runtime import build_runtime
+from timebase_mcp.runtime.operations import run_with_runtime
+from timebase_mcp.runtime.pool import TimeBaseConnectionPool, TimeBaseOperationBudget
+from timebase_mcp.runtime.state import build_runtime
 
 _ASYNCIO_WAIT_FOR = asyncio.wait_for
 
 
 class StubClient:
-    def __init__(self, *, key: str, read_only: bool) -> None:
+    def __init__(self, *, key: str) -> None:
         self.key = key
-        self.read_only = read_only
         self.close_calls = 0
         self.interrupt_calls = 0
         self.closed_event = threading.Event()
@@ -43,10 +44,6 @@ class StubClient:
     def interrupt(self) -> None:
         self.interrupt_calls += 1
         self.close()
-
-
-def _assert_writable_open_requested(read_only: bool) -> None:
-    assert read_only is False
 
 
 def _wait_for_test_release(
@@ -114,9 +111,8 @@ async def test_run_with_runtime_reuses_client_from_instance_pool(
 ) -> None:
     created_clients: list[StubClient] = []
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
-        _assert_writable_open_requested(read_only)
-        client = StubClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -131,7 +127,6 @@ async def test_run_with_runtime_reuses_client_from_instance_pool(
 
     assert first_client_id == second_client_id
     assert len(created_clients) == 1
-    assert created_clients[0].read_only is False
 
     await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
 
@@ -144,9 +139,8 @@ async def test_run_with_runtime_uses_selected_instance(
 ) -> None:
     created_clients: list[StubClient] = []
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
-        _assert_writable_open_requested(read_only)
-        client = StubClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -203,9 +197,8 @@ async def test_run_with_runtime_uses_only_instance_when_key_is_omitted(
 ) -> None:
     created_clients: list[StubClient] = []
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
-        _assert_writable_open_requested(read_only)
-        client = StubClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -236,9 +229,8 @@ async def test_run_with_runtime_closes_broken_client_after_connection_error(
 ) -> None:
     created_clients: list[StubClient] = []
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
-        _assert_writable_open_requested(read_only)
-        client = StubClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -274,14 +266,13 @@ async def test_run_with_runtime_retries_after_client_creation_connection_error(
     created_clients: list[StubClient] = []
     create_attempts = 0
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
+    def build_client(instance) -> StubClient:
         nonlocal create_attempts
-        _assert_writable_open_requested(read_only)
         create_attempts += 1
         if create_attempts == 1:
             raise TimeBaseConnectionError("connection refused")
 
-        client = StubClient(key=instance.key, read_only=read_only)
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -298,7 +289,6 @@ async def test_run_with_runtime_retries_after_client_creation_connection_error(
 
     assert create_attempts == 2
     assert len(created_clients) == 1
-    assert created_clients[0].read_only is False
     assert second_client_id == id(created_clients[0])
 
     await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
@@ -312,9 +302,8 @@ async def test_run_with_runtime_propagates_client_creation_errors_without_reuse(
 ) -> None:
     create_attempts = 0
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
+    def build_client(instance) -> StubClient:
         nonlocal create_attempts
-        _assert_writable_open_requested(read_only)
         create_attempts += 1
         raise TimeBaseConnectionError("connection refused")
 
@@ -342,11 +331,10 @@ async def test_run_with_runtime_rebuilds_pool_after_connection_error(
     allow_background_release = threading.Event()
     background_client: TimeBaseClient | None = None
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
+    def build_client(instance) -> StubClient:
         nonlocal create_attempts
-        _assert_writable_open_requested(read_only)
         create_attempts += 1
-        client = StubClient(key=instance.key, read_only=read_only)
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -399,7 +387,7 @@ async def test_run_with_runtime_rebuilds_pool_after_connection_error(
 
 @pytest.mark.anyio
 async def test_connection_pool_closes_client_created_after_pool_close() -> None:
-    created_client = StubClient(key="default", read_only=False)
+    created_client = StubClient(key="default")
     creator_started = threading.Event()
     allow_creation_finish = threading.Event()
 
@@ -433,9 +421,53 @@ async def test_connection_pool_closes_client_created_after_pool_close() -> None:
 
 
 @pytest.mark.anyio
+async def test_connection_pool_respects_max_idle_clients() -> None:
+    created_clients: list[StubClient] = []
+
+    def create_client() -> StubClient:
+        client = StubClient(key=f"client-{len(created_clients)}")
+        created_clients.append(client)
+        return client
+
+    pool = TimeBaseConnectionPool(
+        instance_key="default",
+        create_client=create_client,
+        max_idle_clients=2,
+    )
+
+    leases = [await pool.acquire() for _ in range(3)]
+    for lease in leases:
+        await lease.aclose()
+
+    assert [client.close_calls for client in created_clients] == [0, 0, 1]
+
+
+@pytest.mark.anyio
+async def test_connection_pool_with_zero_max_idle_always_closes() -> None:
+    created_clients: list[StubClient] = []
+
+    def create_client() -> StubClient:
+        client = StubClient(key="default")
+        created_clients.append(client)
+        return client
+
+    pool = TimeBaseConnectionPool(
+        instance_key="default",
+        create_client=create_client,
+        max_idle_clients=0,
+    )
+
+    lease = await pool.acquire()
+    await lease.aclose()
+
+    assert len(created_clients) == 1
+    assert created_clients[0].close_calls == 1
+
+
+@pytest.mark.anyio
 async def test_connection_pool_closes_late_client_after_cancelled_acquire() -> None:
-    late_client = StubClient(key="default", read_only=False)
-    next_client = StubClient(key="default", read_only=False)
+    late_client = StubClient(key="default")
+    next_client = StubClient(key="default")
     creator_started = threading.Event()
     release_first_create = threading.Event()
     create_attempts = 0
@@ -493,7 +525,7 @@ async def test_connection_pool_closes_late_client_after_cancelled_acquire() -> N
 async def test_connection_pool_aclose_waits_for_background_tasks() -> None:
     pool = TimeBaseConnectionPool(
         instance_key="default",
-        create_client=lambda: StubClient(key="default", read_only=False),
+        create_client=lambda: StubClient(key="default"),
     )
     allow_cleanup_finish = asyncio.Event()
     cleanup_finished = asyncio.Event()
@@ -524,7 +556,7 @@ async def test_connection_pool_aclose_does_not_wait_for_detached_background_task
 ):
     pool = TimeBaseConnectionPool(
         instance_key="default",
-        create_client=lambda: StubClient(key="default", read_only=False),
+        create_client=lambda: StubClient(key="default"),
     )
     allow_cleanup_finish = asyncio.Event()
     cleanup_finished = asyncio.Event()
@@ -558,9 +590,8 @@ async def test_run_with_runtime_fails_fast_when_global_budget_is_exhausted(
     release_first_operation = threading.Event()
     first_client_ready = threading.Event()
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
-        _assert_writable_open_requested(read_only)
-        client = StubClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -608,9 +639,8 @@ async def test_run_with_runtime_timeout_interrupts_client_and_releases_budget(
 ) -> None:
     created_clients: list[StubClient] = []
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
-        _assert_writable_open_requested(read_only)
-        client = StubClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -667,9 +697,8 @@ async def test_run_with_runtime_returns_completed_result_when_timeout_races_comp
 ) -> None:
     created_clients: list[StubClient] = []
 
-    def build_client(instance, *, read_only: bool = False) -> StubClient:
-        _assert_writable_open_requested(read_only)
-        client = StubClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -700,6 +729,7 @@ async def test_run_with_runtime_timeout_logs_interrupt_failure_and_releases_budg
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     class InterruptFailingClient(StubClient):
+        @override
         def interrupt(self) -> None:
             self.interrupt_calls += 1
             self.close()
@@ -708,9 +738,8 @@ async def test_run_with_runtime_timeout_logs_interrupt_failure_and_releases_budg
     created_clients: list[InterruptFailingClient] = []
     allow_operation_finish = threading.Event()
 
-    def build_client(instance, *, read_only: bool = False) -> InterruptFailingClient:
-        _assert_writable_open_requested(read_only)
-        client = InterruptFailingClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> InterruptFailingClient:
+        client = InterruptFailingClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -764,14 +793,14 @@ async def test_run_with_runtime_timeout_does_not_block_runtime_close(
     release_operation = threading.Event()
 
     class NonInterruptingClient(StubClient):
+        @override
         def interrupt(self) -> None:
             self.interrupt_calls += 1
 
     created_clients: list[NonInterruptingClient] = []
 
-    def build_client(instance, *, read_only: bool = False) -> NonInterruptingClient:
-        _assert_writable_open_requested(read_only)
-        client = NonInterruptingClient(key=instance.key, read_only=read_only)
+    def build_client(instance) -> NonInterruptingClient:
+        client = NonInterruptingClient(key=instance.key)
         created_clients.append(client)
         return client
 

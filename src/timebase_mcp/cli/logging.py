@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import logging
 
-from timebase_mcp.config import MCPSettings
+from timebase_mcp.config.settings import MCPSettings
 
 _LOG_FORMAT = "%(asctime)s %(name)s %(levelname)s %(message)s"
 

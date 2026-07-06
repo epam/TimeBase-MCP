@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 import os
+from collections.abc import AsyncGenerator
 
 import pytest
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from tests.integration.support import seed_bars_stream, wait_for_timebase
-from timebase_mcp.config import MCPSettings
+from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.server import create_server
 
 

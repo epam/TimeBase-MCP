@@ -16,6 +16,7 @@ class TimeBaseServerConfiguration(BaseModel):
 
 
 class MCPServerConfiguration(BaseModel):
+    version: str
     transport: str
     inbound_auth_mode: str = "none"
     principal: str | None = None

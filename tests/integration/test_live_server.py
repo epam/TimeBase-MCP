@@ -1,19 +1,18 @@
 from __future__ import annotations
 
+import pytest
 from mcp.client.session import ClientSession
 from mcp.types import TextContent, TextResourceContents
 from pydantic import AnyUrl, TypeAdapter
-import pytest
 
 from tests.integration.support import SeededStream
-from timebase_mcp.models import (
+from timebase_mcp.models.core import (
     CompileQQLResult,
     StreamInfo,
     StreamSchema,
     StreamSymbols,
     StreamTimeRange,
 )
-
 
 pytestmark = pytest.mark.integration
 
@@ -40,7 +39,7 @@ def _resource_uri(value: str) -> AnyUrl:
     return _RESOURCE_URI_ADAPTER.validate_python(value)
 
 
-def _list_streams(result) -> list[StreamInfo]:
+def list_stream_infos(result) -> list[StreamInfo]:
     structured_content = result.structuredContent or []
     if isinstance(structured_content, dict):
         structured_content = structured_content.get("result", [])
@@ -73,7 +72,7 @@ async def test_list_streams_and_stream_catalog_show_seeded_stream(
     seeded_stream: SeededStream,
 ) -> None:
     tool_result = await client_session.call_tool("list_streams", {})
-    tool_streams = _list_streams(tool_result)
+    tool_streams = list_stream_infos(tool_result)
 
     assert tool_result.isError is False
     assert any(stream.key == seeded_stream.stream_key for stream in tool_streams)

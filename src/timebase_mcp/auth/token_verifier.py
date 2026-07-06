@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import logging
 from collections.abc import Iterable, Sequence
+from typing_extensions import override
 from typing import Any
 
 import jwt
@@ -65,6 +66,7 @@ class JwksTokenVerifier(TokenVerifier):
         self._algorithms = list(algorithms)
         self._client_id_claim = client_id_claim
 
+    @override
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
             return await asyncio.to_thread(self._verify_sync, token)
@@ -113,6 +115,7 @@ class ApiKeyStoreVerifier(TokenVerifier):
     def __init__(self, store: KeyStore) -> None:
         self._store = store
 
+    @override
     async def verify_token(self, token: str) -> AccessToken | None:
         return await asyncio.to_thread(self._verify_sync, token)
 

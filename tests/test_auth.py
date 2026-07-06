@@ -6,6 +6,7 @@ import os
 import types
 from pathlib import Path
 
+import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -14,12 +15,10 @@ from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 from pydantic import ValidationError
 
+import timebase_mcp.clients.http.transport as http_transport_module
 from timebase_mcp.auth import keystore
-import timebase_mcp.auth.discovery as discovery_module
 from timebase_mcp.auth.discovery import (
     InteractiveEndpoints,
-    derive_http_base_url,
-    derive_http_base_urls,
     fetch_oauthinfo,
     resolve_interactive_endpoints,
 )
@@ -36,13 +35,18 @@ from timebase_mcp.auth.token_verifier import (
     decode_claims_unverified,
     extract_scopes,
 )
-from timebase_mcp.clients.enterprise import EnterpriseTimeBaseClient
 from timebase_mcp.clients.factory import create_timebase_client
-from timebase_mcp.config import MCPSettings, SettingsEnv
+from timebase_mcp.clients.http.transport import timebase_http_request
+from timebase_mcp.clients.native.common import connection_error_hint
+from timebase_mcp.config.env import SettingsEnv
+from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import ConfigurationError, TimeBaseOperationStateError
-from timebase_mcp.instance import TimeBaseInstanceConfig
-from timebase_mcp.operations import run_with_runtime
-from timebase_mcp.runtime import build_runtime
+from timebase_mcp.runtime.instance import (
+    TimeBaseInstanceConfig,
+    TimeBaseInstanceRuntime,
+)
+from timebase_mcp.runtime.operations import run_with_runtime
+from timebase_mcp.runtime.state import build_runtime
 
 
 @pytest.fixture
@@ -784,21 +788,430 @@ async def test_build_inbound_auth_with_api_keys_file(
     assert await inbound.token_verifier.verify_token("tbk_unknown") is None
 
 
-def test_derive_http_base_url() -> None:
-    assert derive_http_base_url("dxtick://host:8011") == "http://host:8011"
-    assert derive_http_base_url("dxctick://h1:8010|h2:8011") == "http://h1:8010"
-    assert derive_http_base_url("not a url") is None
+class _DiscoveryResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return
+
+    def json(self) -> dict:
+        return self._payload
 
 
-def test_derive_http_base_urls_prefers_https_for_ssl_termination(
+def _timebase_oauthinfo_payload() -> dict:
+    return {
+        "issuer": "https://login.microsoftonline.com/tenant/v2.0",
+        "clientid": [
+            {"app": "timebase.client.service", "name": "service-client"},
+            {"app": "timebase.client.application", "name": "application-client"},
+        ],
+        "scope": "api://api-id/app openid profile offline_access",
+        "scopes": [
+            {
+                "app": "timebase.client.application",
+                "scope": "api://api-id/app openid profile offline_access",
+            },
+            {"app": "timebase.client.service", "scope": "api://api-id/.default"},
+        ],
+    }
+
+
+def _http_instance(
+    *,
+    tb_url: str = "dxtick://tb.example.com:8011",
+    http_base_url: str | None = "https://tb.example.com:8011",
+) -> TimeBaseInstanceRuntime:
+    return TimeBaseInstanceRuntime(
+        key="default",
+        config=TimeBaseInstanceConfig(
+            tb_url=tb_url,
+            http_base_url=http_base_url,
+        ),
+    )
+
+
+def test_fetch_oauthinfo_parses_timebase_application_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("DXAPI_SSL_TERMINATION", "true")
+    instance = _http_instance()
 
-    assert derive_http_base_urls("dxtick://tb.example.com:8011") == (
-        "https://tb.example.com:8011",
-        "http://tb.example.com:8011",
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == "https://tb.example.com:8011/tb/ping":
+            return httpx.Response(200)
+        if str(request.url) == "https://tb.example.com:8011/tb/oauthinfo":
+            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+        raise AssertionError(f"unexpected URL: {request.url}")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        monkeypatch.setattr(
+            "timebase_mcp.auth.discovery.timebase_http_request",
+            lambda instance, endpoint, **kwargs: timebase_http_request(
+                instance,
+                endpoint,
+                client=client,
+                **kwargs,
+            ),
+        )
+        info = fetch_oauthinfo(instance)
+
+    assert info.issuer == "https://login.microsoftonline.com/tenant/v2.0"
+    assert info.client_id == "application-client"
+    assert info.scope == "api://api-id/app openid profile offline_access"
+    assert info.discovery_base_url == "https://tb.example.com:8011"
+
+
+def test_fetch_oauthinfo_uses_single_clientid_without_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instance = _http_instance()
+
+    monkeypatch.setattr(
+        "timebase_mcp.auth.discovery.timebase_http_request",
+        lambda _instance, _endpoint, **_kwargs: httpx.Response(
+            200,
+            json={
+                "issuer": "https://idp.example",
+                "clientid": [{"name": "single-client"}],
+                "scopes": [{"scope": "openid profile"}],
+            },
+        ),
     )
+
+    info = fetch_oauthinfo(instance)
+
+    assert info.client_id == "single-client"
+    assert info.scope == "openid profile"
+
+
+def test_fetch_oauthinfo_allows_empty_payload_when_auth_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instance = _http_instance()
+
+    monkeypatch.setattr(
+        "timebase_mcp.auth.discovery.timebase_http_request",
+        lambda _instance, _endpoint, **_kwargs: httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=b"",
+        ),
+    )
+
+    info = fetch_oauthinfo(instance)
+
+    assert info.issuer is None
+    assert info.client_id is None
+    assert info.scope is None
+
+
+def test_fetch_oauthinfo_raises_configuration_error_for_non_empty_invalid_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instance = _http_instance()
+
+    monkeypatch.setattr(
+        "timebase_mcp.auth.discovery.timebase_http_request",
+        lambda _instance, _endpoint, **_kwargs: httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            content=b"not-json",
+        ),
+    )
+
+    with pytest.raises(ConfigurationError, match="Expected JSON response"):
+        fetch_oauthinfo(instance)
+
+
+def test_resolve_interactive_endpoints_tries_https_candidate_and_trusts_all(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("DXAPI_SSL_TERMINATION", "true")
+    monkeypatch.setenv("DXAPI_SSL_TRUST_ALL", "true")
+    monkeypatch.setattr(http_transport_module, "_trust_all_warning_emitted", False)
+    instance = _http_instance(http_base_url=None)
+    calls: list[tuple[str, bool]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://tb.example.com:8011/tb/ping":
+            return httpx.Response(200)
+        if url == "https://tb.example.com:8011/tb/oauthinfo":
+            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+        raise AssertionError(f"unexpected URL: {url}")
+
+    def fake_get(url: str, *, timeout: float, verify: bool) -> _DiscoveryResponse:
+        calls.append((url, verify))
+        if (
+            url
+            == "https://login.microsoftonline.com/tenant/v2.0/.well-known/openid-configuration"
+        ):
+            return _DiscoveryResponse(
+                {
+                    "authorization_endpoint": "https://login.example/auth",
+                    "token_endpoint": "https://login.example/token",
+                    "jwks_uri": "https://login.example/jwks",
+                }
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx.get", fake_get)
+
+    with (
+        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        caplog.at_level(logging.WARNING),
+    ):
+        monkeypatch.setattr(
+            "timebase_mcp.clients.http.transport.httpx.request",
+            lambda method, url, *, timeout, verify, **kwargs: client.request(
+                method,
+                url,
+                timeout=timeout,
+                **kwargs,
+            ),
+        )
+        endpoints = resolve_interactive_endpoints(
+            instance=instance,
+            issuer_override=None,
+            client_id_override=None,
+            scope_override=None,
+        )
+
+    assert endpoints.authorization_endpoint == "https://login.example/auth"
+    assert endpoints.token_endpoint == "https://login.example/token"
+    assert endpoints.client_id == "application-client"
+    assert endpoints.scope == "api://api-id/app openid profile offline_access"
+    assert endpoints.discovery_base_url == "https://tb.example.com:8011"
+    assert calls == [
+        (
+            "https://login.microsoftonline.com/tenant/v2.0/.well-known/openid-configuration",
+            False,
+        ),
+    ]
+    assert caplog.text.count("DXAPI_SSL_TRUST_ALL=true disables TLS") == 1
+
+
+def test_trust_all_warning_emits_once_for_multiple_discovery_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("DXAPI_SSL_TRUST_ALL", "true")
+    monkeypatch.setattr(http_transport_module, "_trust_all_warning_emitted", False)
+    instance = _http_instance()
+
+    def fake_request(method: str, url: str, *, timeout: float, verify: bool, **_kwargs):
+        assert verify is False
+        if url == "https://tb.example.com:8011/tb/ping":
+            return httpx.Response(200)
+        if url == "https://tb.example.com:8011/tb/oauthinfo":
+            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+    )
+
+    with caplog.at_level(logging.WARNING):
+        fetch_oauthinfo(instance)
+        fetch_oauthinfo(instance)
+
+    assert caplog.text.count("DXAPI_SSL_TRUST_ALL=true disables TLS") == 1
+
+
+def test_trust_all_warning_not_emitted_when_verification_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.delenv("DXAPI_SSL_TRUST_ALL", raising=False)
+    monkeypatch.setattr(http_transport_module, "_trust_all_warning_emitted", False)
+    instance = _http_instance()
+
+    def fake_request(method: str, url: str, *, timeout: float, verify: bool, **_kwargs):
+        assert verify is True
+        if url == "https://tb.example.com:8011/tb/ping":
+            return httpx.Response(200)
+        if url == "https://tb.example.com:8011/tb/oauthinfo":
+            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+    )
+
+    with caplog.at_level(logging.WARNING):
+        fetch_oauthinfo(instance)
+
+    assert "DXAPI_SSL_TRUST_ALL=true disables TLS" not in caplog.text
+
+
+class _StubClient:
+    def __init__(self, *, key: str) -> None:
+        self.key = key
+
+    def close(self) -> None:
+        return
+
+    def interrupt(self) -> None:
+        return
+
+
+class _TrackingStubClient:
+    def __init__(self, *, key: str) -> None:
+        self.key = key
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+    def interrupt(self) -> None:
+        self.close()
+
+
+def _forward_identity_settings() -> MCPSettings:
+    return MCPSettings(
+        transport="streamable-http",
+        auth_audience="timebase-api",
+        auth_public_url="https://mcp.example.com/mcp",
+        tb_auth_mode="forward_identity",
+    )
+
+
+@pytest.mark.anyio
+async def test_forward_identity_does_not_keep_idle_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_clients: list[_TrackingStubClient] = []
+
+    def build_client(instance):
+        client = _TrackingStubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(_forward_identity_settings())
+
+    access = AccessToken(
+        token="caller-jwt",
+        client_id="cid",
+        scopes=[],
+        subject="user-1",
+        claims={"preferred_username": "alice"},
+    )
+    reset = auth_context_var.set(AuthenticatedUser(access))
+    try:
+        first_client_id = await run_with_runtime(runtime, lambda client: id(client))
+        second_client_id = await run_with_runtime(runtime, lambda client: id(client))
+    finally:
+        auth_context_var.reset(reset)
+
+    assert first_client_id != second_client_id
+    assert len(created_clients) == 2
+    assert created_clients[0].close_calls == 1
+    assert created_clients[1].close_calls == 1
+
+    await runtime.aclose()
+
+
+@pytest.mark.anyio
+async def test_forward_identity_uses_per_principal_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list = []
+
+    def build_client(instance):
+        captured.append(instance.config)
+        return _StubClient(key=instance.key)
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(_forward_identity_settings())
+    instance = runtime.default_instance
+
+    access = AccessToken(
+        token="caller-jwt",
+        client_id="cid",
+        scopes=[],
+        subject="user-1",
+        claims={"preferred_username": "alice"},
+    )
+    reset = auth_context_var.set(AuthenticatedUser(access))
+    try:
+        await run_with_runtime(runtime, lambda client: id(client))
+    finally:
+        auth_context_var.reset(reset)
+
+    assert "user-1" in instance._principal_pools
+    assert captured and captured[0].access_token == "caller-jwt"
+    assert captured[0].access_token_username == "alice"
+
+    await runtime.aclose()
+
+
+@pytest.mark.anyio
+async def test_forward_identity_rotates_pool_when_principal_token_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list = []
+    created_clients: list[_StubClient] = []
+
+    def build_client(instance):
+        captured.append(instance.config)
+        client = _StubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(_forward_identity_settings())
+
+    def set_principal(token: str):
+        access = AccessToken(
+            token=token,
+            client_id="cid",
+            scopes=[],
+            subject="user-1",
+            claims={"preferred_username": "alice"},
+        )
+        return auth_context_var.set(AuthenticatedUser(access))
+
+    reset = set_principal("caller-jwt-1")
+    try:
+        first_client_id = await run_with_runtime(runtime, lambda client: id(client))
+    finally:
+        auth_context_var.reset(reset)
+
+    reset = set_principal("caller-jwt-2")
+    try:
+        second_client_id = await run_with_runtime(runtime, lambda client: id(client))
+    finally:
+        auth_context_var.reset(reset)
+
+    assert first_client_id != second_client_id
+    assert [config.access_token for config in captured] == [
+        "caller-jwt-1",
+        "caller-jwt-2",
+    ]
+    assert len(created_clients) == 2
+
+    await runtime.aclose()
+
+
+@pytest.mark.anyio
+async def test_forward_identity_without_principal_raises() -> None:
+    runtime = build_runtime(_forward_identity_settings())
+
+    with pytest.raises(TimeBaseOperationStateError, match="not authenticated"):
+        await run_with_runtime(runtime, lambda client: id(client))
+
+    await runtime.aclose()
 
 
 def test_resolve_interactive_redirect_uri_defaults_to_mcp_host_port() -> None:
@@ -863,340 +1276,8 @@ def test_settings_resolved_interactive_redirect_uri_is_none_for_http(
     assert settings.resolved_interactive_redirect_uri is None
 
 
-def test_derive_http_base_urls_prefers_https_for_ssl_scheme() -> None:
-    assert derive_http_base_urls("dstick://tb.example.com:8011") == (
-        "https://tb.example.com:8011",
-        "http://tb.example.com:8011",
-    )
-
-
-class _DiscoveryResponse:
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        return
-
-    def json(self) -> dict:
-        return self._payload
-
-
-def _timebase_oauthinfo_payload() -> dict:
-    return {
-        "issuer": "https://login.microsoftonline.com/tenant/v2.0",
-        "clientid": [
-            {"app": "timebase.client.service", "name": "service-client"},
-            {"app": "timebase.client.application", "name": "application-client"},
-        ],
-        "scope": "api://api-id/app openid profile offline_access",
-        "scopes": [
-            {
-                "app": "timebase.client.application",
-                "scope": "api://api-id/app openid profile offline_access",
-            },
-            {"app": "timebase.client.service", "scope": "api://api-id/.default"},
-        ],
-    }
-
-
-def test_fetch_oauthinfo_parses_timebase_application_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_get(url: str, *, timeout: float, verify: bool) -> _DiscoveryResponse:
-        assert url == "https://tb.example.com:8011/tb/oauthinfo"
-        assert timeout > 0
-        assert verify is True
-        return _DiscoveryResponse(_timebase_oauthinfo_payload())
-
-    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx.get", fake_get)
-
-    info = fetch_oauthinfo("https://tb.example.com:8011")
-
-    assert info.issuer == "https://login.microsoftonline.com/tenant/v2.0"
-    assert info.client_id == "application-client"
-    assert info.scope == "api://api-id/app openid profile offline_access"
-    assert info.discovery_base_url == "https://tb.example.com:8011"
-
-
-def test_fetch_oauthinfo_uses_single_clientid_without_app(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_get(_url: str, *, timeout: float, verify: bool) -> _DiscoveryResponse:
-        return _DiscoveryResponse(
-            {
-                "issuer": "https://idp.example",
-                "clientid": [{"name": "single-client"}],
-                "scopes": [{"scope": "openid profile"}],
-            }
-        )
-
-    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx.get", fake_get)
-
-    info = fetch_oauthinfo("https://tb.example.com:8011")
-
-    assert info.client_id == "single-client"
-    assert info.scope == "openid profile"
-
-
-def test_fetch_oauthinfo_allows_empty_payload_when_auth_not_configured(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _EmptyResponse:
-        headers = {"content-type": "text/plain"}
-        content = b""
-
-        def raise_for_status(self) -> None:
-            return
-
-        def json(self) -> dict:
-            raise ValueError("bad json")
-
-    monkeypatch.setattr(
-        "timebase_mcp.auth.discovery.httpx.get",
-        lambda _url, *, timeout, verify: _EmptyResponse(),
-    )
-
-    info = fetch_oauthinfo("http://tb.example.com:8011")
-
-    assert info.issuer is None
-    assert info.client_id is None
-    assert info.scope is None
-
-
-def test_fetch_oauthinfo_raises_configuration_error_for_non_empty_invalid_json(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _InvalidJsonResponse:
-        headers = {"content-type": "text/plain"}
-        content = b"not-json"
-
-        def raise_for_status(self) -> None:
-            return
-
-        def json(self) -> dict:
-            raise ValueError("bad json")
-
-    monkeypatch.setattr(
-        "timebase_mcp.auth.discovery.httpx.get",
-        lambda _url, *, timeout, verify: _InvalidJsonResponse(),
-    )
-
-    with pytest.raises(ConfigurationError, match="Expected JSON response"):
-        fetch_oauthinfo("http://tb.example.com:8011")
-
-
-def test_resolve_interactive_endpoints_tries_https_candidate_and_trusts_all(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setenv("DXAPI_SSL_TERMINATION", "true")
-    monkeypatch.setenv("DXAPI_SSL_TRUST_ALL", "true")
-    monkeypatch.setattr(discovery_module, "_trust_all_warning_emitted", False)
-    calls: list[tuple[str, bool]] = []
-
-    def fake_get(url: str, *, timeout: float, verify: bool) -> _DiscoveryResponse:
-        calls.append((url, verify))
-        if url == "https://tb.example.com:8011/tb/oauthinfo":
-            return _DiscoveryResponse(_timebase_oauthinfo_payload())
-        if (
-            url
-            == "https://login.microsoftonline.com/tenant/v2.0/.well-known/openid-configuration"
-        ):
-            return _DiscoveryResponse(
-                {
-                    "authorization_endpoint": "https://login.example/auth",
-                    "token_endpoint": "https://login.example/token",
-                    "jwks_uri": "https://login.example/jwks",
-                }
-            )
-        raise AssertionError(f"unexpected URL: {url}")
-
-    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx.get", fake_get)
-
-    with caplog.at_level(logging.WARNING):
-        endpoints = resolve_interactive_endpoints(
-            discovery_base_url=derive_http_base_urls("dxtick://tb.example.com:8011"),
-            issuer_override=None,
-            client_id_override=None,
-            scope_override=None,
-        )
-
-    assert endpoints.authorization_endpoint == "https://login.example/auth"
-    assert endpoints.token_endpoint == "https://login.example/token"
-    assert endpoints.client_id == "application-client"
-    assert endpoints.scope == "api://api-id/app openid profile offline_access"
-    assert endpoints.discovery_base_url == "https://tb.example.com:8011"
-    assert calls == [
-        ("https://tb.example.com:8011/tb/oauthinfo", False),
-        (
-            "https://login.microsoftonline.com/tenant/v2.0/.well-known/openid-configuration",
-            False,
-        ),
-    ]
-    assert caplog.text.count("DXAPI_SSL_TRUST_ALL=true disables TLS") == 1
-
-
-def test_trust_all_warning_emits_once_for_multiple_discovery_calls(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setenv("DXAPI_SSL_TRUST_ALL", "true")
-    monkeypatch.setattr(discovery_module, "_trust_all_warning_emitted", False)
-
-    def fake_get(_url: str, *, timeout: float, verify: bool) -> _DiscoveryResponse:
-        assert verify is False
-        return _DiscoveryResponse(_timebase_oauthinfo_payload())
-
-    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx.get", fake_get)
-
-    with caplog.at_level(logging.WARNING):
-        fetch_oauthinfo("https://tb.example.com:8011")
-        fetch_oauthinfo("https://tb.example.com:8011")
-
-    assert caplog.text.count("DXAPI_SSL_TRUST_ALL=true disables TLS") == 1
-
-
-def test_trust_all_warning_not_emitted_when_verification_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.delenv("DXAPI_SSL_TRUST_ALL", raising=False)
-    monkeypatch.setattr(discovery_module, "_trust_all_warning_emitted", False)
-
-    def fake_get(_url: str, *, timeout: float, verify: bool) -> _DiscoveryResponse:
-        assert verify is True
-        return _DiscoveryResponse(_timebase_oauthinfo_payload())
-
-    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx.get", fake_get)
-
-    with caplog.at_level(logging.WARNING):
-        fetch_oauthinfo("https://tb.example.com:8011")
-
-    assert "DXAPI_SSL_TRUST_ALL=true disables TLS" not in caplog.text
-
-
-class _StubClient:
-    def __init__(self, *, key: str, read_only: bool) -> None:
-        self.key = key
-        self.read_only = read_only
-
-    def close(self) -> None:
-        return
-
-    def interrupt(self) -> None:
-        return
-
-
-def _forward_identity_settings() -> MCPSettings:
-    return MCPSettings(
-        transport="streamable-http",
-        auth_audience="timebase-api",
-        auth_public_url="https://mcp.example.com/mcp",
-        tb_auth_mode="forward_identity",
-    )
-
-
-@pytest.mark.anyio
-async def test_forward_identity_uses_per_principal_pool(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: list = []
-
-    def build_client(instance, *, read_only: bool = False, config=None):
-        captured.append(config)
-        return _StubClient(key=instance.key, read_only=read_only)
-
-    monkeypatch.setattr(
-        "timebase_mcp.clients.factory.create_timebase_client", build_client
-    )
-
-    runtime = build_runtime(_forward_identity_settings())
-    instance = runtime.default_instance
-
-    access = AccessToken(
-        token="caller-jwt",
-        client_id="cid",
-        scopes=[],
-        subject="user-1",
-        claims={"preferred_username": "alice"},
-    )
-    reset = auth_context_var.set(AuthenticatedUser(access))
-    try:
-        await run_with_runtime(runtime, lambda client: id(client))
-    finally:
-        auth_context_var.reset(reset)
-
-    assert "user-1" in instance._principal_pools
-    assert captured and captured[0].access_token == "caller-jwt"
-    assert captured[0].access_token_username == "alice"
-
-    await runtime.aclose()
-
-
-@pytest.mark.anyio
-async def test_forward_identity_rotates_pool_when_principal_token_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: list = []
-    created_clients: list[_StubClient] = []
-
-    def build_client(instance, *, read_only: bool = False, config=None):
-        captured.append(config)
-        client = _StubClient(key=instance.key, read_only=read_only)
-        created_clients.append(client)
-        return client
-
-    monkeypatch.setattr(
-        "timebase_mcp.clients.factory.create_timebase_client", build_client
-    )
-
-    runtime = build_runtime(_forward_identity_settings())
-
-    def set_principal(token: str):
-        access = AccessToken(
-            token=token,
-            client_id="cid",
-            scopes=[],
-            subject="user-1",
-            claims={"preferred_username": "alice"},
-        )
-        return auth_context_var.set(AuthenticatedUser(access))
-
-    reset = set_principal("caller-jwt-1")
-    try:
-        first_client_id = await run_with_runtime(runtime, lambda client: id(client))
-    finally:
-        auth_context_var.reset(reset)
-
-    reset = set_principal("caller-jwt-2")
-    try:
-        second_client_id = await run_with_runtime(runtime, lambda client: id(client))
-    finally:
-        auth_context_var.reset(reset)
-
-    assert first_client_id != second_client_id
-    assert [config.access_token for config in captured] == [
-        "caller-jwt-1",
-        "caller-jwt-2",
-    ]
-    assert len(created_clients) == 2
-
-    await runtime.aclose()
-
-
-@pytest.mark.anyio
-async def test_forward_identity_without_principal_raises() -> None:
-    runtime = build_runtime(_forward_identity_settings())
-
-    with pytest.raises(TimeBaseOperationStateError, match="not authenticated"):
-        await run_with_runtime(runtime, lambda client: id(client))
-
-    await runtime.aclose()
-
-
 def _interactive_provider(**kwargs) -> InteractiveOAuthProvider:
     provider = InteractiveOAuthProvider(
-        discovery_base_url=None,
         redirect_uri="http://127.0.0.1:8000/",
         **kwargs,
     )
@@ -1277,7 +1358,7 @@ def test_interactive_provider_posts_token_form_with_content_type(
 
 
 def test_interactive_provider_requires_redirect_uri_on_login() -> None:
-    provider = InteractiveOAuthProvider(discovery_base_url=None)
+    provider = InteractiveOAuthProvider()
     provider._endpoints = InteractiveEndpoints(
         authorization_endpoint="https://idp.example/auth",
         token_endpoint="https://idp.example/token",
@@ -1292,7 +1373,6 @@ def test_interactive_provider_requires_redirect_uri_on_login() -> None:
 def test_interactive_provider_token_expiry() -> None:
     clock = {"now": 1000.0}
     provider = InteractiveOAuthProvider(
-        discovery_base_url=None,
         redirect_uri="http://127.0.0.1:8000/",
         monotonic=lambda: clock["now"],
     )
@@ -1314,24 +1394,19 @@ def _patch_auto_client_creation(monkeypatch: pytest.MonkeyPatch):
     captured_configs: list[TimeBaseInstanceConfig] = []
 
     class _AutoClient(_StubClient):
-        def __init__(self, config: TimeBaseInstanceConfig) -> None:
-            super().__init__(key="default", read_only=False)
-            self.config = config
-
-        def set_token_provider(self, _provider: object) -> None:
-            return
+        def __init__(self, instance: TimeBaseInstanceRuntime) -> None:
+            super().__init__(key=instance.key)
+            self.config = instance.config
 
         def open(self) -> None:
             return
 
     def fake_create_client(
-        config: TimeBaseInstanceConfig,
+        instance: TimeBaseInstanceRuntime,
         _edition: str,
-        *,
-        read_only: bool,
     ) -> _AutoClient:
-        captured_configs.append(config)
-        return _AutoClient(config)
+        captured_configs.append(instance.config)
+        return _AutoClient(instance)
 
     monkeypatch.setattr(
         "timebase_mcp.clients.factory._create_client_for_edition",
@@ -1346,7 +1421,7 @@ def _patch_auto_client_creation(monkeypatch: pytest.MonkeyPatch):
 
 def _advertise_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "timebase_mcp.clients.factory.resolve_interactive_endpoints",
+        "timebase_mcp.auth.outbound._resolve_interactive_endpoints",
         lambda **_kwargs: InteractiveEndpoints(
             authorization_endpoint="https://login.example/auth",
             token_endpoint="https://login.example/token",
@@ -1366,7 +1441,7 @@ def test_auto_auth_switches_to_interactive_and_sets_ssl_termination(
     captured_configs = _patch_auto_client_creation(monkeypatch)
     _advertise_oauth(monkeypatch)
     monkeypatch.setattr(
-        "timebase_mcp.instance.TimeBaseInstanceRuntime.get_interactive_provider",
+        "timebase_mcp.runtime.instance.TimeBaseInstanceRuntime.get_interactive_provider",
         lambda _instance: object(),
     )
 
@@ -1389,7 +1464,7 @@ def test_auto_auth_passes_interactive_overrides(
     captured_configs = _patch_auto_client_creation(monkeypatch)
     _advertise_oauth(monkeypatch)
     monkeypatch.setattr(
-        "timebase_mcp.instance.TimeBaseInstanceRuntime.get_interactive_provider",
+        "timebase_mcp.runtime.instance.TimeBaseInstanceRuntime.get_interactive_provider",
         lambda _instance: object(),
     )
 
@@ -1512,7 +1587,7 @@ def test_auto_auth_switches_to_none_when_discovery_fails(
         raise ConfigurationError("not advertised")
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.factory.resolve_interactive_endpoints",
+        "timebase_mcp.auth.outbound._resolve_interactive_endpoints",
         fail_discovery,
     )
 
@@ -1529,10 +1604,15 @@ def test_enterprise_auto_auth_hint_includes_discovery_failure() -> None:
         auth_mode="auto",
         auto_auth_error="Failed to fetch TimeBase OAuth metadata.",
     )
-    client = EnterpriseTimeBaseClient(config)
+    instance = TimeBaseInstanceRuntime(
+        key="default",
+        config=config,
+    )
 
-    hint = client._connection_error_hint(
-        Exception("Handshake failed: Wrong username or password")
+    hint = connection_error_hint(
+        instance,
+        Exception("Handshake failed: Wrong username or password"),
+        edition="enterprise",
     )
 
     assert "TIMEBASE_AUTH_MODE=interactive" in hint

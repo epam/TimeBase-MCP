@@ -5,9 +5,10 @@ from mcp.server.session import ServerSession
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from timebase_mcp.models import CompileQQLResult, QQLFunctionsResult
-from timebase_mcp.operations import run_with_context
-from timebase_mcp.runtime import TimeBaseRuntime
+from timebase_mcp.models.core import CompileQQLResult, QQLFunctionsResult
+from timebase_mcp.runtime.operations import run_with_context
+from timebase_mcp.services import queries as query_service
+from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.tools.common import InstanceName
 
 
@@ -37,7 +38,7 @@ def register_query_tools(mcp: FastMCP) -> None:
     ) -> str:
         return await run_with_context(
             ctx,
-            lambda client: client.execute_query(query, limit),
+            lambda client: query_service.execute_query(client, query, limit),
             instance_key=instance_key,
         )
 
@@ -61,7 +62,7 @@ def register_query_tools(mcp: FastMCP) -> None:
     ) -> CompileQQLResult:
         return await run_with_context(
             ctx,
-            lambda client: client.compile_query(query),
+            lambda client: query_service.compile_query(client, query),
             instance_key=instance_key,
         )
 
@@ -93,7 +94,7 @@ def register_query_tools(mcp: FastMCP) -> None:
     ) -> QQLFunctionsResult:
         return await run_with_context(
             ctx,
-            lambda client: client.list_qql_functions(kind, function_id),
+            lambda client: query_service.list_qql_functions(client, kind, function_id),
             instance_key=instance_key,
         )
 
