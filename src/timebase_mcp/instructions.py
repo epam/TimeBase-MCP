@@ -6,6 +6,9 @@ when choosing between configured instances; pass the chosen name as the
 instance_key argument for each TB operation. In multi-instance setups,
 instance_key is required. In single-instance setups, omit it.
 
+Some tools have limited TimeBase server versions support.
+Don't assume everything is available on the specific instance.
+
 Before querying: discover streams, read schema, then check time range and symbols.
 Sample messages only when you need raw examples.
 
