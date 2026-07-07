@@ -1,6 +1,6 @@
 # Local setup
 
-Manual local `stdio` setup. For Cursor, VS Code, or Claude Code, [TimeBase Agent Plugins](https://github.com/epam/TimeBase-Agent-Plugins) is recommended. You can also configure those clients manually in [step 3](#3-add-the-server-to-your-mcp-client).
+Manual local `stdio` setup. For Cursor, VS Code, Claude Code or Desktop, [TimeBase Agent Plugins](https://github.com/epam/TimeBase-Agent-Plugins) is recommended. You can also configure those clients manually in [step 3](#3-add-the-server-to-your-mcp-client).
 
 ## 1. Install
 
@@ -133,10 +133,6 @@ Create `.vscode/mcp.json`:
 <details>
 <summary>Claude Desktop</summary>
 
-Available options: Claude Desktop config and MCP Bundle.
-
-#### MCP Config
-
 Follow the [official guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers#installing-the-filesystem-server) for your OS, for the configuration use the following:
 
 ```json
@@ -152,18 +148,6 @@ Follow the [official guide](https://modelcontextprotocol.io/docs/develop/connect
   }
 }
 ```
-
-#### MCP Bundle
-
-This currently requires [Node.js](https://nodejs.org/en/download) and [uv](https://docs.astral.sh/uv/getting-started/installation/) to be installed.
-
-1. Run the following command in this repo to create the bundle:
-
-```bash
-npx @anthropic-ai/mcpb pack
-```
-
-2. In Claude Desktop go to `Settings > Extensions > Advanced settings > Install extension` and select the `.mcpb` file generated in step 1.
 
 </details>
 
