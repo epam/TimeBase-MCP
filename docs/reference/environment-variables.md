@@ -3,7 +3,7 @@
 | Variable | Default | Description |
 | - | - | - |
 | `TIMEBASE_URL` | `dxtick://localhost:8011` | TimeBase native connection URL. |
-| `TIMEBASE_SERVERS` | None | Multi-server list: a JSON array string, a path to a JSON file, or omit and use indexed `TIMEBASE_SERVERS_{n}_*` env vars (see [Multi-server configuration](#multi-server-timebase-configuration)). |
+| `TIMEBASE_SERVERS` | None | Multi-server list: a JSON array string, a path to a JSON file, or omit and use indexed `TIMEBASE_SERVERS_{n}_*` env vars (see [Multi-server configuration](./multi-server.md)). |
 | `TIMEBASE_USERNAME` | None | Username for `basic` auth; optional username override for `oauth2_client_credentials`. |
 | `TIMEBASE_PASSWORD` | None | Password for `basic` auth. |
 | `TIMEBASE_AUTH_MODE` | `auto` | Outbound mode: `auto`, `none`, `basic`, `oauth2_client_credentials`, `forward_identity`, `interactive`. |

@@ -169,15 +169,15 @@ timebase-mcp
 
 ## Example deployments
 
-**Per-user SSO:** TimeBase enforces each caller's permissions via `forward_identity`. See [examples/deployments/per-user-sso.env](../examples/deployments/per-user-sso.env).
+**Per-user SSO:** TimeBase enforces each caller's permissions via `forward_identity`. See [examples/deployments/per-user-sso.env](./examples/deployments/per-user-sso.env).
 
-**SSO for MCP, unprotected TimeBase:** inbound SSO protects MCP; TimeBase has no auth. `MCP_AUTH_ISSUER_URL` is required because `/tb/oauthinfo` does not provide an issuer. Register a separate MCP API app in your IdP (`MCP_AUTH_AUDIENCE`) and expose the scope used in `MCP_AUTH_REQUIRED_SCOPES`. See [examples/deployments/sso-unprotected-timebase.env](../examples/deployments/sso-unprotected-timebase.env).
+**SSO for MCP, unprotected TimeBase:** inbound SSO protects MCP; TimeBase has no auth. `MCP_AUTH_ISSUER_URL` is required because `/tb/oauthinfo` does not provide an issuer. Register a separate MCP API app in your IdP (`MCP_AUTH_AUDIENCE`) and expose the scope used in `MCP_AUTH_REQUIRED_SCOPES`. See [examples/deployments/sso-unprotected-timebase.env](./examples/deployments/sso-unprotected-timebase.env).
 
-**SSO for MCP, protected TimeBase:** same inbound MCP SSO setup as above, but MCP connects to TimeBase with a shared service account. See [examples/deployments/sso-protected-timebase.env](../examples/deployments/sso-protected-timebase.env).
+**SSO for MCP, protected TimeBase:** same inbound MCP SSO setup as above, but MCP connects to TimeBase with a shared service account. See [examples/deployments/sso-protected-timebase.env](./examples/deployments/sso-protected-timebase.env).
 
 Use `TIMEBASE_OAUTH2_TOKEN_PARAMS` (a JSON object) only if your provider needs extra token fields such as `audience` or `resource`; it cannot override `grant_type`, `client_id`, `client_secret`, or `scope`.
 
-**Protect MCP with API keys, unprotected TimeBase:** see [examples/deployments/api-keys.env](../examples/deployments/api-keys.env).
+**Protect MCP with API keys, unprotected TimeBase:** see [examples/deployments/api-keys.env](./examples/deployments/api-keys.env).
 
 ## TLS / SSL to TimeBase
 
