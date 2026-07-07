@@ -11,7 +11,7 @@ The server can run two ways:
 
 | You want to | Go to |
 | - | - |
-| Use TimeBase MCP locally (Cursor, VS Code, Claude Code) | [Agent Plugins Quickstart](https://github.com/epam/TimeBase-Agent-Plugins#quickstart) |
+| Use TimeBase MCP locally (Cursor, VS Code, Claude Code/Desktop) | [Agent Plugins Quickstart](https://github.com/epam/TimeBase-Agent-Plugins#quickstart) |
 | Manual local setup | [Local setup](docs/local-setup.md) |
 | Deploy a shared remote MCP server | [Remote deployment](docs/remote-deployment.md) |
 | Connect to a running remote server | [Connect to a remote server](docs/connect-remote.md) |
