@@ -6,12 +6,11 @@ Manual local `stdio` setup. For Cursor, VS Code, Claude Code or Desktop, [TimeBa
 
 **Prerequisites:** Python 3.10–3.14 and one of [pip](https://pip.pypa.io/en/stable/installation/), [uv](https://docs.astral.sh/uv/getting-started/installation/), or [pipx](https://pipx.pypa.io/stable/how-to/install-pipx/).
 
-<!--TODO: Remove version pinning when v0.2 is released.-->
 | Tool | Command |
 | - | - |
-| **uv (recommended)** | `uv tool install -p 3.14 --from "timebase-mcp[all]==0.2.0rc3" timebase-mcp` |
-| **pip** | `python -m pip install "timebase-mcp[all]==0.2.0rc3"` |
-| **pipx** | `pipx install --python 3.14 "timebase-mcp[all]==0.2.0rc3"` |
+| **uv (recommended)** | `uv tool install -p 3.14 --from "timebase-mcp[all]" timebase-mcp` |
+| **pip** | `python -m pip install "timebase-mcp[all]"` |
+| **pipx** | `pipx install --python 3.14 "timebase-mcp[all]"` |
 
 The `[all]` extra installs both TimeBase client editions. The server picks the right one per connected instance.
 

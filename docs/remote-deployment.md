@@ -151,7 +151,7 @@ Create an env file from one of the examples below, then run:
 ```bash
 docker run --rm -p 8000:8000 \
   --env-file ./timebase-mcp.env \
-  ghcr.io/epam/timebase-mcp:0.2.0rc3
+  ghcr.io/epam/timebase-mcp:0.2.0
 ```
 
 </details>
