@@ -24,7 +24,8 @@ ARG UV_VERSION
 LABEL org.opencontainers.image.title="TimeBase MCP" \
     org.opencontainers.image.description="Model Context Protocol (MCP) server for TimeBase" \
     org.opencontainers.image.source="https://github.com/epam/TimeBase-MCP" \
-    org.opencontainers.image.base.name="python:${PYTHON_VERSION}-slim-trixie"
+    org.opencontainers.image.base.name="python:${PYTHON_VERSION}-slim-trixie" \
+    io.modelcontextprotocol.server.name="io.github.epam/TimeBase-MCP"
 
 ENV MCP_TRANSPORT=streamable-http \
     MCP_HOST=0.0.0.0 \

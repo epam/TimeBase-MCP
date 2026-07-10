@@ -76,7 +76,7 @@ stress = [
 ]
 
 [tool.basedpyright]
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
 reportMissingImports = true
