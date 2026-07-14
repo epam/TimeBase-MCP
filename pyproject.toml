@@ -50,14 +50,14 @@ Changelog = "https://github.com/epam/TimeBase-MCP/releases"
 
 [project.optional-dependencies]
 community = [
-    "dxapi-ce===6.2.3",
+    "dxapi-ce>=6.2.3,<6.3",
 ]
 enterprise = [
-    "dxapi-ee===5.5.74",
+    "dxapi-ee>=5.5.74,<5.6",
 ]
 all = [
-    "dxapi-ee===5.5.74",
-    "dxapi-ce===6.2.3",
+    "dxapi-ee>=5.5.74,<5.6",
+    "dxapi-ce>=6.2.3,<6.3",
 ]
 
 [build-system]
