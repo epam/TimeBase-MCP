@@ -34,7 +34,7 @@ def test_settings_use_defaults_when_environment_is_not_set() -> None:
     assert settings.log_level == "INFO"
     assert settings.max_concurrent_ops == 0
     assert settings.max_idle_clients == 0
-    assert settings.operation_timeout_seconds == 0
+    assert settings.operation_timeout_seconds == 60
 
 
 def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -176,7 +176,7 @@ def test_settings_ignore_empty_environment_values(
     assert settings.log_level == "INFO"
     assert settings.max_concurrent_ops == 0
     assert settings.max_idle_clients == 0
-    assert settings.operation_timeout_seconds == 0
+    assert settings.operation_timeout_seconds == 60
     assert settings.oauth2_config is None
     assert settings.uses_oauth2 is False
 

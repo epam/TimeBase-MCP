@@ -144,7 +144,7 @@ class MCPSettings(BaseSettings):
         ),
     )
     operation_timeout_seconds: int = Field(
-        default=0,
+        default=60,
         ge=0,
         validation_alias=SettingsEnv.MCP_OPERATION_TIMEOUT_SECONDS,
         description=(
