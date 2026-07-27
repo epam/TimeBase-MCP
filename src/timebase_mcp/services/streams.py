@@ -137,6 +137,7 @@ def get_stream_messages_text(
 
     stream = client.get_stream(stream_key)
     messages = client.read_stream_messages(stream, reverse, count, space)
+    client.raise_if_cancelled()
 
     return _format_stream_messages_preview(
         stream_key=stream_key,

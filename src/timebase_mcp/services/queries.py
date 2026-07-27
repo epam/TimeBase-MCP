@@ -28,6 +28,7 @@ def execute_query(client: TimeBaseClient, query: str, limit: int = 50) -> str:
         raise ValueError("limit must be at least 1.")
 
     messages = client.read_query_messages(query_text, limit)
+    client.raise_if_cancelled()
     return _format_query_messages_preview(
         query_text=query_text,
         limit=limit,
@@ -65,11 +66,13 @@ def list_qql_functions(
     result = QQLFunctionsResult()
     selected_kinds = ("stateless", "stateful") if kind == "all" else (kind,)
     for selected_kind in selected_kinds:
+        client.raise_if_cancelled()
         query_text = _qql_functions_query(
             selected_kind,
             function_id=function_id,
         )
         messages = client.read_query_messages(query_text, _QQL_FUNCTIONS_LIMIT)
+        client.raise_if_cancelled()
         functions = normalize_qql_functions(selected_kind, messages)
         setattr(result, selected_kind, functions)
 

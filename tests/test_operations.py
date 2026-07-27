@@ -3,8 +3,9 @@ import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from typing import cast
+from typing import Any, cast
 
+import anyio
 import pytest
 from typing_extensions import override
 
@@ -30,8 +31,10 @@ class StubClient:
         self.key = key
         self.close_calls = 0
         self.interrupt_calls = 0
+        self.request_cancel_calls = 0
         self.closed_event = threading.Event()
         self._closed = False
+        self._cancel_event: threading.Event | None = None
 
     def close(self) -> None:
         if self._closed:
@@ -44,6 +47,19 @@ class StubClient:
     def interrupt(self) -> None:
         self.interrupt_calls += 1
         self.close()
+
+    def bind_operation(self) -> None:
+        self._cancel_event = threading.Event()
+        self.rows_read = 0
+
+    def request_cancel(self) -> None:
+        self.request_cancel_calls += 1
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel_event is not None and self._cancel_event.is_set()
 
 
 def _wait_for_test_release(
@@ -648,6 +664,8 @@ async def test_run_with_runtime_timeout_interrupts_client_and_releases_budget(
         "timebase_mcp.clients.factory.create_timebase_client", build_client
     )
 
+    monkeypatch.setattr(operations_module, "_COOPERATIVE_STOP_GRACE_SECONDS", 0.1)
+
     runtime = build_runtime(
         MCPSettings(operation_timeout_seconds=1, max_concurrent_ops=1)
     )
@@ -759,6 +777,8 @@ async def test_run_with_runtime_timeout_logs_interrupt_failure_and_releases_budg
         "timebase_mcp.clients.factory.create_timebase_client", build_client
     )
 
+    monkeypatch.setattr(operations_module, "_COOPERATIVE_STOP_GRACE_SECONDS", 0.1)
+
     runtime = build_runtime(
         MCPSettings(operation_timeout_seconds=1, max_concurrent_ops=1)
     )
@@ -770,7 +790,15 @@ async def test_run_with_runtime_timeout_logs_interrupt_failure_and_releases_budg
         ):
             await run_with_runtime(runtime, slow_operation)
 
-    assert "Failed to interrupt TimeBase operation for instance default" in caplog.text
+        # The interrupt now runs in a detached task after the grace period.
+        await _wait_until(
+            lambda: (
+                "Failed to interrupt TimeBase operation for instance default"
+                in caplog.text
+            ),
+            "Interrupt failure was not logged.",
+        )
+
     assert "interrupt failed" in caplog.text
 
     allow_operation_finish.set()
@@ -815,6 +843,8 @@ async def test_run_with_runtime_timeout_does_not_block_runtime_close(
         "timebase_mcp.clients.factory.create_timebase_client", build_client
     )
 
+    monkeypatch.setattr(operations_module, "_COOPERATIVE_STOP_GRACE_SECONDS", 0.1)
+
     runtime = build_runtime(MCPSettings(operation_timeout_seconds=1))
 
     with pytest.raises(
@@ -828,7 +858,11 @@ async def test_run_with_runtime_timeout_does_not_block_runtime_close(
         "Runtime close waited for a detached timed-out operation.",
     )
 
-    assert created_clients[0].interrupt_calls == 1
+    # The operation ignores the cooperative flag, so it is escalated after the grace.
+    await _wait_until(
+        lambda: created_clients[0].interrupt_calls == 1,
+        "Timed-out client was not interrupted.",
+    )
     assert created_clients[0].close_calls == 0
 
     release_operation.set()
@@ -837,3 +871,172 @@ async def test_run_with_runtime_timeout_does_not_block_runtime_close(
         lambda: created_clients[0].close_calls == 1,
         "Timed-out client was not eventually closed after shutdown.",
     )
+
+
+@pytest.mark.anyio
+async def test_run_with_runtime_cancel_stops_cooperative_operation_without_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_clients: list[StubClient] = []
+    operation_started = threading.Event()
+    operation_stopped = threading.Event()
+
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(MCPSettings())
+
+    def cooperative_operation(client: TimeBaseClient) -> str:
+        stub_client = cast(StubClient, client)
+        operation_started.set()
+        while not stub_client.cancel_requested:
+            time.sleep(0.01)
+        operation_stopped.set()
+        return "stopped"
+
+    operation_task = asyncio.create_task(
+        run_with_runtime(runtime, cooperative_operation)
+    )
+
+    await _wait_for_thread_event(
+        operation_started,
+        "Cooperative operation did not start.",
+    )
+
+    operation_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await operation_task
+
+    await _wait_for_thread_event(
+        operation_stopped,
+        "Cooperative operation was not cancelled.",
+    )
+
+    assert created_clients[0].request_cancel_calls >= 1
+    # A cooperative stop must not hard-interrupt or close the connection.
+    assert created_clients[0].interrupt_calls == 0
+    assert created_clients[0].close_calls == 0
+
+    await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
+
+    # The reusable client is closed only at shutdown.
+    assert created_clients[0].close_calls == 1
+
+
+@pytest.mark.anyio
+async def test_run_with_runtime_cancel_escalates_to_interrupt_when_uncooperative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_clients: list[StubClient] = []
+    operation_started = threading.Event()
+    release_operation = threading.Event()
+
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+    monkeypatch.setattr(operations_module, "_COOPERATIVE_STOP_GRACE_SECONDS", 0.1)
+
+    runtime = build_runtime(MCPSettings())
+
+    def uncooperative_operation(client: TimeBaseClient) -> int:
+        stub_client = cast(StubClient, client)
+        operation_started.set()
+        # Ignore the cooperative flag, only stop once the connection is closed
+        # by the hard interrupt, or when explicitly released.
+        _wait_for_test_release(
+            stub_client.closed_event,
+            "Uncooperative operation was not interrupted.",
+        )
+        release_operation.set()
+        return id(stub_client)
+
+    operation_task = asyncio.create_task(
+        run_with_runtime(runtime, uncooperative_operation)
+    )
+
+    await _wait_for_thread_event(
+        operation_started,
+        "Uncooperative operation did not start.",
+    )
+
+    operation_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await operation_task
+
+    # After the cooperative grace elapses, the operation is hard-interrupted.
+    await _wait_until(
+        lambda: (
+            created_clients[0].interrupt_calls == 1
+            and created_clients[0].close_calls == 1
+        ),
+        "Uncooperative operation was not escalated to a hard interrupt.",
+    )
+
+    await _wait_for_thread_event(
+        release_operation,
+        "Interrupted operation did not finish.",
+    )
+
+    await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
+
+
+@pytest.mark.anyio
+async def test_run_with_runtime_timeout_keeps_connection_when_stop_is_cooperative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_clients: list[StubClient] = []
+    operation_stopped = threading.Event()
+
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(MCPSettings(operation_timeout_seconds=1))
+
+    def cooperative_operation(client: TimeBaseClient) -> str:
+        stub_client = cast(StubClient, client)
+        while not stub_client.cancel_requested:
+            time.sleep(0.01)
+        operation_stopped.set()
+        return "stopped"
+
+    with pytest.raises(
+        TimeBaseOperationTimeoutError,
+        match="timed out after 1 second",
+    ):
+        await run_with_runtime(runtime, cooperative_operation)
+
+    await _wait_for_thread_event(
+        operation_stopped,
+        "Timed-out operation was not stopped cooperatively.",
+    )
+
+    # A timeout that the operation honors must not churn the pooled connection.
+    await _wait_until(
+        lambda: created_clients[0].request_cancel_calls >= 1,
+        "Timed-out operation was not asked to stop.",
+    )
+    assert created_clients[0].interrupt_calls == 0
+    assert created_clients[0].close_calls == 0
+
+    await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
+
+    assert created_clients[0].close_calls == 1

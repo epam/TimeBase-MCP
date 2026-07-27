@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+import pytest
 from typing_extensions import override
 
 from timebase_mcp.clients.base import TimeBaseClient
 from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
+from timebase_mcp.errors import TimeBaseOperationCancelledError
 from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.runtime.instance import (
     TimeBaseInstanceConfig,
@@ -349,3 +351,27 @@ def test_list_qql_functions_escapes_function_id_filter() -> None:
     assert client.executed_queries == [query]
     assert result.function_count == 0
     assert result.overload_count == 0
+
+
+def test_list_qql_functions_raises_and_stops_when_cancelled() -> None:
+    """A stop must not yield a truncated result presented as complete."""
+    stateless_query = "SELECT stateless_functions() AS FUNCS"
+    stateful_query = "SELECT stateful_functions() AS FUNCS"
+
+    class CancellingClient(StubQQLFunctionsClient):
+        @override
+        def read_query_messages(
+            self, query_text: str, limit: int
+        ) -> list[dict[str, Any]]:
+            self.executed_queries.append(query_text)
+            # Mimic a read loop that broke between rows: partial data, flag set.
+            self.request_cancel()
+            return []
+
+    client = CancellingClient({stateless_query: [], stateful_query: []})
+
+    with pytest.raises(TimeBaseOperationCancelledError):
+        list_qql_functions(client, "all")
+
+    # The second query must never be issued after a stop.
+    assert client.executed_queries == [stateless_query]

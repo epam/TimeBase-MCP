@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable
 from typing import TypeVar
 
+import anyio
 from mcp.server.fastmcp import Context
 from mcp.server.session import ServerSession
 
@@ -17,11 +18,14 @@ from timebase_mcp.errors import (
     TimeBaseOperationTimeoutError,
 )
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
-from timebase_mcp.runtime.pool import TimeBaseConnectionPool
+from timebase_mcp.runtime.pool import TimeBaseConnectionLease, TimeBaseConnectionPool
 from timebase_mcp.runtime.state import TimeBaseRuntime
 
 ResultT = TypeVar("ResultT")
 logger = logging.getLogger(__name__)
+
+# Grace period to allow a cancellation to complete before escalating to an interrupt
+_COOPERATIVE_STOP_GRACE_SECONDS = 2.0
 
 
 def _resolve_pool(
@@ -69,6 +73,7 @@ async def run_with_runtime(
     try:
         principal_key, pool = _resolve_pool(instance)
         lease = await pool.acquire()
+        lease.client.bind_operation()
         operation_future = asyncio.get_running_loop().run_in_executor(
             None,
             operation,
@@ -85,10 +90,11 @@ async def run_with_runtime(
                 if operation_future.done():
                     return await operation_future
 
-                release_lease_in_background = await _interrupt_operation(
+                release_lease_in_background = _begin_stop(
                     lease,
                     operation_future,
                     instance_key=instance.key,
+                    reason="operation timeout",
                 )
                 raise TimeBaseOperationTimeoutError(
                     f"TimeBase operation timed out after {timeout_seconds} seconds."
@@ -96,15 +102,19 @@ async def run_with_runtime(
 
         return await asyncio.shield(operation_future)
     except asyncio.CancelledError:
+        # We are inside an already-cancelled scope, so we must not await here:
+        # anyio re-cancels awaits made in a cancelled scope, which would skip
+        # cleanup. Initiate the stop synchronously and hand off the rest.
         if (
             lease is not None
             and operation_future is not None
             and not operation_future.done()
         ):
-            release_lease_in_background = await _interrupt_operation(
+            release_lease_in_background = _begin_stop(
                 lease,
                 operation_future,
                 instance_key=instance.key,
+                reason="client cancellation",
             )
         raise
     except TimeBaseConnectionError as exc:
@@ -148,25 +158,99 @@ async def run_with_context(
     )
 
 
-async def _release_lease_after_operation(
+def _begin_stop(
+    lease: TimeBaseConnectionLease[TimeBaseClient],
     operation_future: asyncio.Future[ResultT],
-    lease,
+    *,
+    instance_key: str,
+    reason: str,
+) -> bool:
+    """Triggers a graceful stop. Returns True if lease release was deferred.
+
+    Never awaits, so it also works inside an already-cancelled scope.
+    """
+    logger.info(
+        "Stopping TimeBase operation for instance %s (%s) after %d row(s).",
+        instance_key,
+        reason,
+        lease.client.rows_read,
+    )
+    lease.client.request_cancel()
+
+    if operation_future.done():
+        return False
+
+    lease.pool.start_detached_background_task(
+        _finalize_stopped_operation(
+            operation_future,
+            lease,
+            instance_key=instance_key,
+            reason=reason,
+        )
+    )
+    return True
+
+
+async def _finalize_stopped_operation(
+    operation_future: asyncio.Future[ResultT],
+    lease: TimeBaseConnectionLease[TimeBaseClient],
+    *,
+    instance_key: str,
+    reason: str,
 ) -> None:
+    """Waits for a stopped operation to unwind, escalating if needed.
+
+    Runs detached, outside the cancelled request scope, so awaiting is safe here.
+    """
+    started = time.monotonic()
     try:
-        await operation_future
-    except Exception:
-        pass
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(operation_future),
+                timeout=_COOPERATIVE_STOP_GRACE_SECONDS,
+            )
+        except TimeoutError:
+            await _escalate_to_interrupt(
+                operation_future,
+                lease,
+                instance_key=instance_key,
+                reason=reason,
+            )
+        except Exception:
+            lease.mark_broken()
+            logger.debug(
+                "TimeBase operation for instance %s raised while stopping (%s).",
+                instance_key,
+                reason,
+                exc_info=True,
+            )
+        else:
+            logger.info(
+                "TimeBase operation for instance %s stopped cooperatively in %.2fs "
+                "(%s), connection reused.",
+                instance_key,
+                time.monotonic() - started,
+                reason,
+            )
     finally:
         await lease.aclose()
 
 
-async def _interrupt_operation(
-    lease,
+async def _escalate_to_interrupt(
     operation_future: asyncio.Future[ResultT],
+    lease: TimeBaseConnectionLease[TimeBaseClient],
     *,
     instance_key: str,
-) -> bool:
+    reason: str,
+) -> None:
     lease.mark_broken()
+    logger.warning(
+        "TimeBase operation for instance %s did not stop within %.1fs (%s), "
+        "closing the connection.",
+        instance_key,
+        _COOPERATIVE_STOP_GRACE_SECONDS,
+        reason,
+    )
 
     try:
         await asyncio.to_thread(lease.client.interrupt)
@@ -178,10 +262,15 @@ async def _interrupt_operation(
             exc_info=True,
         )
 
-    if operation_future.done():
-        return False
+    # Unbounded on purpose. If interrupt fails to unblock the native call this
+    # never returns, so the lease is never released.
+    try:
+        await operation_future
+    except Exception:
+        logger.debug(
+            "Interrupted TimeBase operation for instance %s ended with an error.",
+            instance_key,
+            exc_info=True,
+        )
 
-    lease.pool.start_detached_background_task(
-        _release_lease_after_operation(operation_future, lease)
-    )
-    return True
+
