@@ -181,6 +181,7 @@ class CommunityTimeBaseClient(TimeBaseClient):
             cursor = cast("dxapi_ce_types.TickCursor", cursor)
             while not self.cancel_requested and len(messages) < count and cursor.next():
                 messages.append(normalize_message(cursor.getMessage()))
+                self._rows_read = len(messages)
 
         if reverse:
             messages.reverse()
@@ -197,6 +198,7 @@ class CommunityTimeBaseClient(TimeBaseClient):
             cursor = cast("dxapi_ce_types.TickCursor", cursor)
             while not self.cancel_requested and len(messages) < limit and cursor.next():
                 messages.append(normalize_message(cursor.getMessage()))
+                self._rows_read = len(messages)
 
         return messages
 

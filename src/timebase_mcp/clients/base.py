@@ -59,6 +59,7 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
     def bind_operation(self) -> None:
         """Resets cancellation state before an operation is dispatched."""
         self._cancel_event = threading.Event()
+        self._rows_read = 0
 
     @property
     def cancel_requested(self) -> bool:
@@ -78,6 +79,11 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
             raise TimeBaseOperationCancelledError(
                 "TimeBase operation was stopped before it returned a complete result."
             )
+
+    @property
+    def rows_read(self) -> int:
+        """Rows read so far by the current operation, for progress reporting."""
+        return self._rows_read
 
     @abstractmethod
     def require_db(self) -> Any:

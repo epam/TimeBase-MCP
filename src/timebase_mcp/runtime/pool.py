@@ -24,6 +24,10 @@ class ClosableClient(Protocol):
 
     def request_cancel(self) -> None: ...
 
+    @property
+    def rows_read(self) -> int: ...
+
+
 ClientT = TypeVar("ClientT", bound=ClosableClient)
 ClientCreator = Callable[[], ClientT]
 

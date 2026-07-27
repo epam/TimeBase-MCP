@@ -158,6 +158,7 @@ def register_stream_tools(mcp: FastMCP) -> None:
                 cursor=cursor,
             ),
             instance_key=instance_key,
+            report_progress=True,
         )
 
     @mcp.tool(
@@ -198,6 +199,7 @@ def register_stream_tools(mcp: FastMCP) -> None:
                 space,
             ),
             instance_key=instance_key,
+            report_progress=True,
         )
 
     _ = (

@@ -211,7 +211,9 @@ async def test_read_resources_return_expected_text(
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_resource(_ctx, operation, *, instance_key=None):
+    async def run_resource(
+        _ctx, operation, *, instance_key=None, report_progress=False
+    ):
         selected_instances.append(instance_key)
 
         class StubClient:
@@ -274,7 +276,9 @@ async def test_read_resources_return_expected_text(
 async def test_read_resource_surfaces_operation_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fail_resource(_ctx, _operation, *, instance_key=None):
+    async def fail_resource(
+        _ctx, _operation, *, instance_key=None, report_progress=False
+    ):
         raise TimeBaseOperationError("resource failed")
 
     monkeypatch.setattr(resources_module, "run_with_context", fail_resource)
@@ -329,7 +333,9 @@ async def test_read_instance_scoped_resource_uses_selected_instance_when_multipl
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_resource(_ctx, operation, *, instance_key=None):
+    async def run_resource(
+        _ctx, operation, *, instance_key=None, report_progress=False
+    ):
         selected_instances.append(instance_key)
 
         class StubClient:
@@ -373,7 +379,9 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_resource(_ctx, operation, *, instance_key=None):
+    async def run_resource(
+        _ctx, operation, *, instance_key=None, report_progress=False
+    ):
         selected_instances.append(instance_key)
 
         class StubClient:
@@ -455,7 +463,9 @@ async def test_call_stream_tool_uses_selected_instance(
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_list_streams(_ctx, _operation, *, instance_key=None):
+    async def run_list_streams(
+        _ctx, _operation, *, instance_key=None, report_progress=False
+    ):
         selected_instances.append(instance_key)
         return [StreamInfo(key="bars", description=f"from {instance_key}")]
 
@@ -492,7 +502,9 @@ async def test_call_stream_tool_uses_single_instance_when_key_is_omitted(
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_list_streams(_ctx, _operation, *, instance_key=None):
+    async def run_list_streams(
+        _ctx, _operation, *, instance_key=None, report_progress=False
+    ):
         selected_instances.append(instance_key)
         return []
 
@@ -516,10 +528,15 @@ async def test_call_stream_space_tools_pass_arguments(
     selected_instances: list[str | None] = []
     calls: list[tuple[str, str, str | None]] = []
 
-    async def run_stream_operation(_ctx, operation, *, instance_key=None):
+    async def run_stream_operation(
+        _ctx, operation, *, instance_key=None, report_progress=False
+    ):
         selected_instances.append(instance_key)
 
         class StubClient:
+            def raise_if_cancelled(self) -> None:
+                return None
+
             def get_stream(self, stream_key: str) -> str:
                 return stream_key
 
@@ -981,7 +998,9 @@ async def test_call_compile_query_tool_returns_compact_success_payload(
         AbstractAsyncContextManager[ClientSession],
     ],
 ) -> None:
-    async def run_compile_query(_ctx, _operation, *, instance_key=None):
+    async def run_compile_query(
+        _ctx, _operation, *, instance_key=None, report_progress=False
+    ):
         return {
             "valid": True,
             "error": None,
@@ -1024,7 +1043,9 @@ async def test_call_list_qql_functions_tool_returns_structured_payload(
     selected_kinds: list[str] = []
     selected_function_ids: list[str | None] = []
 
-    async def run_list_qql_functions(_ctx, operation, *, instance_key=None):
+    async def run_list_qql_functions(
+        _ctx, operation, *, instance_key=None, report_progress=False
+    ):
         selected_instances.append(instance_key)
         return operation(object())
 
@@ -1106,7 +1127,9 @@ async def test_call_execute_query_tool_surfaces_operation_errors_to_client(
     error_type: type[Exception],
     message: str,
 ) -> None:
-    async def fail_operation(_ctx, _operation, *, instance_key=None):
+    async def fail_operation(
+        _ctx, _operation, *, instance_key=None, report_progress=False
+    ):
         raise error_type(message)
 
     monkeypatch.setattr(query_tools, "run_with_context", fail_operation)
@@ -1138,7 +1161,9 @@ async def test_call_compile_query_tool_returns_structured_error_payload(
         AbstractAsyncContextManager[ClientSession],
     ],
 ) -> None:
-    async def run_compile_query(_ctx, _operation, *, instance_key=None):
+    async def run_compile_query(
+        _ctx, _operation, *, instance_key=None, report_progress=False
+    ):
         return {
             "valid": False,
             "error": "QQL compile error [at 6.7..12].",

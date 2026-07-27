@@ -32,6 +32,7 @@ class StubClient:
         self.close_calls = 0
         self.interrupt_calls = 0
         self.request_cancel_calls = 0
+        self.rows_read = 0
         self.closed_event = threading.Event()
         self._closed = False
         self._cancel_event: threading.Event | None = None
@@ -989,6 +990,129 @@ async def test_run_with_runtime_cancel_escalates_to_interrupt_when_uncooperative
         release_operation,
         "Interrupted operation did not finish.",
     )
+
+    await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
+
+
+@pytest.mark.anyio
+async def test_run_with_runtime_reports_monotonic_progress_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(operations_module, "_PROGRESS_INTERVAL_SECONDS", 0.02)
+
+    created_clients: list[StubClient] = []
+    release_operation = threading.Event()
+
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(MCPSettings())
+
+    def rowless_operation(_client: TimeBaseClient) -> str:
+        # Produces no rows: rows_read stays 0 for the whole run.
+        _wait_for_test_release(release_operation, "Operation was not released.")
+        return "done"
+
+    progress_calls: list[tuple[float, str | None]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str | None = None,
+        ) -> None:
+            progress_calls.append((progress, message))
+
+    operation_task = asyncio.create_task(
+        run_with_runtime(
+            runtime,
+            rowless_operation,
+            progress_ctx=cast(Any, _RecordingContext()),
+        )
+    )
+
+    await _wait_until(
+        lambda: len(progress_calls) >= 3,
+        "Progress heartbeat did not fire.",
+    )
+
+    release_operation.set()
+    result = await _with_timeout(operation_task, "Operation did not finish.")
+
+    assert result == "done"
+
+    values = [progress for progress, _ in progress_calls]
+    # Heartbeat is strictly increasing even though rows_read stayed 0.
+    assert values == sorted(values)
+    assert len(set(values)) == len(values)
+    assert all(
+        message is not None and "Waiting for results" in message
+        for _, message in progress_calls
+    )
+
+    await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
+
+
+@pytest.mark.anyio
+async def test_run_with_runtime_stops_when_progress_stream_reports_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Covers the defensive branch in isolation. It does not reproduce a real
+    # streamable-http disconnect, where the SDK swallows the stream error instead.
+    monkeypatch.setattr(operations_module, "_PROGRESS_INTERVAL_SECONDS", 0.02)
+
+    created_clients: list[StubClient] = []
+    operation_stopped = threading.Event()
+
+    def build_client(instance) -> StubClient:
+        client = StubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+
+    runtime = build_runtime(MCPSettings())
+
+    def cooperative_operation(client: TimeBaseClient) -> str:
+        stub_client = cast(StubClient, client)
+        while not stub_client.cancel_requested:
+            time.sleep(0.01)
+        operation_stopped.set()
+        return "stopped"
+
+    class _DisconnectedContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str | None = None,
+        ) -> None:
+            raise anyio.ClosedResourceError
+
+    result = await _with_timeout(
+        run_with_runtime(
+            runtime,
+            cooperative_operation,
+            progress_ctx=cast(Any, _DisconnectedContext()),
+        ),
+        "Operation was not cancelled after client disconnect.",
+    )
+
+    assert result == "stopped"
+    assert operation_stopped.is_set()
+    assert created_clients[0].request_cancel_calls >= 1
+    # A cooperative stop must not hard-interrupt or close the connection.
+    assert created_clients[0].interrupt_calls == 0
+    assert created_clients[0].close_calls == 0
 
     await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
 

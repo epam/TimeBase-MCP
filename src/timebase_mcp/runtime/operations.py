@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from typing import TypeVar
 
@@ -24,6 +25,7 @@ from timebase_mcp.runtime.state import TimeBaseRuntime
 ResultT = TypeVar("ResultT")
 logger = logging.getLogger(__name__)
 
+_PROGRESS_INTERVAL_SECONDS = 1.0
 # Grace period to allow a cancellation to complete before escalating to an interrupt
 _COOPERATIVE_STOP_GRACE_SECONDS = 2.0
 
@@ -57,6 +59,7 @@ async def run_with_runtime(
     operation: Callable[[TimeBaseClient], ResultT],
     *,
     instance_key: str | None = None,
+    progress_ctx: Context[ServerSession, TimeBaseRuntime] | None = None,
 ) -> ResultT:
     """Run a TimeBase operation against a resolved runtime instance."""
     try:
@@ -68,6 +71,7 @@ async def run_with_runtime(
     principal_key = SHARED_PRINCIPAL_KEY
     lease = None
     operation_future = None
+    progress_task: asyncio.Task[None] | None = None
     release_lease_in_background = False
 
     try:
@@ -79,6 +83,11 @@ async def run_with_runtime(
             operation,
             lease.client,
         )
+
+        if progress_ctx is not None:
+            progress_task = asyncio.create_task(
+                _pump_progress(progress_ctx, lease.client, operation_future)
+            )
 
         if timeout_seconds > 0:
             try:
@@ -140,6 +149,15 @@ async def run_with_runtime(
         )
         raise TimeBaseOperationError(str(exc)) from exc
     finally:
+        if progress_task is not None:
+            progress_task.cancel()
+            with anyio.CancelScope(shield=True):
+                try:
+                    await progress_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.debug("Progress reporting failed.", exc_info=True)
         if lease is not None and not release_lease_in_background:
             await lease.aclose()
 
@@ -149,12 +167,14 @@ async def run_with_context(
     operation: Callable[[TimeBaseClient], ResultT],
     *,
     instance_key: str | None = None,
+    report_progress: bool = False,
 ) -> ResultT:
     runtime = ctx.request_context.lifespan_context
     return await run_with_runtime(
         runtime,
         operation,
         instance_key=instance_key,
+        progress_ctx=ctx if report_progress else None,
     )
 
 
@@ -274,3 +294,41 @@ async def _escalate_to_interrupt(
         )
 
 
+async def _pump_progress(
+    ctx: Context[ServerSession, TimeBaseRuntime],
+    client: TimeBaseClient,
+    operation_future: asyncio.Future[ResultT],
+) -> None:
+    """Emits a progress heartbeat to keep client inactivity timers from firing."""
+    tick = 0
+    started = time.monotonic()
+    while not operation_future.done():
+        await asyncio.sleep(_PROGRESS_INTERVAL_SECONDS)
+        if operation_future.done():
+            return
+
+        tick += 1
+        elapsed = int(time.monotonic() - started)
+        rows = client.rows_read
+        if rows > 0:
+            message = f"Reading results... {rows} rows, {elapsed}s elapsed"
+        else:
+            message = f"Waiting for results... {elapsed}s elapsed"
+
+        try:
+            await ctx.report_progress(progress=float(tick), message=message)
+        # Does not fire on a streamable-http disconnect: the SDK's message
+        # router swallows the stream error on its own task, so a dropped client is
+        # bounded by the operation timeout. SDK v2 should surface it.
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            logger.info("Progress stream closed, stopping the operation.")
+            client.request_cancel()
+            return
+        except Exception:
+            logger.debug(
+                "Progress reporting failed, stopping progress updates.",
+                exc_info=True,
+            )
+            return
+
+        logger.debug("Progress tick %d for in-flight operation: %s", tick, message)
