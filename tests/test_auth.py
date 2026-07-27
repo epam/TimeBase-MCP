@@ -1055,6 +1055,12 @@ class _StubClient:
     def interrupt(self) -> None:
         return
 
+    def bind_operation(self) -> None:
+        return None
+
+    def request_cancel(self) -> None:
+        return
+
 
 class _TrackingStubClient:
     def __init__(self, *, key: str) -> None:
@@ -1066,6 +1072,12 @@ class _TrackingStubClient:
 
     def interrupt(self) -> None:
         self.close()
+
+    def bind_operation(self) -> None:
+        return None
+
+    def request_cancel(self) -> None:
+        return
 
 
 def _forward_identity_settings() -> MCPSettings:

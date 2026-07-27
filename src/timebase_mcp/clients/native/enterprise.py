@@ -176,8 +176,9 @@ class EnterpriseTimeBaseClient(TimeBaseClient):
         messages: list[dict[str, Any]] = []
         with call_cursor_context(stream.select, timestamp, options) as cursor:
             cursor = cast("dxapi_types.TickCursor", cursor)
-            while len(messages) < count and cursor.next():
+            while not self.cancel_requested and len(messages) < count and cursor.next():
                 messages.append(normalize_message(cursor.getMessage()))
+                self._rows_read = len(messages)
 
         if reverse:
             messages.reverse()
@@ -192,8 +193,9 @@ class EnterpriseTimeBaseClient(TimeBaseClient):
             query_text,
         ) as cursor:
             cursor = cast("dxapi_types.TickCursor", cursor)
-            while len(messages) < limit and cursor.next():
+            while not self.cancel_requested and len(messages) < limit and cursor.next():
                 messages.append(normalize_message(cursor.getMessage()))
+                self._rows_read = len(messages)
 
         return messages
 

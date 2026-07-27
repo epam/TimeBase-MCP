@@ -14,9 +14,18 @@ logger = logging.getLogger(__name__)
 
 
 class ClosableClient(Protocol):
-    """Minimal client lifecycle surface required by the runtime pool."""
+    """Client surface the runtime needs from a pooled client."""
 
     def close(self) -> None: ...
+
+    def interrupt(self) -> None: ...
+
+    def bind_operation(self) -> None: ...
+
+    def request_cancel(self) -> None: ...
+
+    @property
+    def rows_read(self) -> int: ...
 
 
 ClientT = TypeVar("ClientT", bound=ClosableClient)

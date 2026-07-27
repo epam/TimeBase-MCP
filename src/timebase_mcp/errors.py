@@ -18,6 +18,10 @@ class TimeBaseOperationTimeoutError(TimeBaseOperationError):
     """Raised when a TimeBase operation exceeds the configured timeout."""
 
 
+class TimeBaseOperationCancelledError(TimeBaseOperationError):
+    """Raised when a TimeBase operation stopped before producing a full result."""
+
+
 class TimeBaseOperationLimitError(TimeBaseOperationError):
     """Raised when the server rejects a TimeBase operation due to admission limits."""
 

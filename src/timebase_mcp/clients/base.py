@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from datetime import datetime
@@ -7,6 +8,7 @@ from types import TracebackType
 from typing import Any, Literal
 from typing_extensions import override
 
+from timebase_mcp.errors import TimeBaseOperationCancelledError
 from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 
@@ -24,6 +26,8 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
         instance: TimeBaseInstanceRuntime,
     ) -> None:
         self._instance = instance
+        self._cancel_event: threading.Event | None = None
+        self._rows_read: int = 0
 
     @override
     def __enter__(self) -> "TimeBaseClient":
@@ -49,8 +53,37 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
         """Closes the TimeBase connection."""
 
     def interrupt(self) -> None:
-        """Interruption of an in-flight operation."""
+        """Interrupts an in-flight operation by closing the connection."""
         self.close()
+
+    def bind_operation(self) -> None:
+        """Resets cancellation state before an operation is dispatched."""
+        self._cancel_event = threading.Event()
+        self._rows_read = 0
+
+    @property
+    def cancel_requested(self) -> bool:
+        """Whether cooperative cancellation was requested for this operation."""
+        event = self._cancel_event
+        return event is not None and event.is_set()
+
+    def request_cancel(self) -> None:
+        """Signals the in-flight read loop to stop."""
+        if self._cancel_event is None:
+            self._cancel_event = threading.Event()
+        self._cancel_event.set()
+
+    def raise_if_cancelled(self) -> None:
+        """Fails if this operation was stopped, so partial data is never returned."""
+        if self.cancel_requested:
+            raise TimeBaseOperationCancelledError(
+                "TimeBase operation was stopped before it returned a complete result."
+            )
+
+    @property
+    def rows_read(self) -> int:
+        """Rows read so far by the current operation, for progress reporting."""
+        return self._rows_read
 
     @abstractmethod
     def require_db(self) -> Any:

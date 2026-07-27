@@ -40,6 +40,7 @@ def register_query_tools(mcp: FastMCP) -> None:
             ctx,
             lambda client: query_service.execute_query(client, query, limit),
             instance_key=instance_key,
+            report_progress=True,
         )
 
     @mcp.tool(
@@ -96,6 +97,7 @@ def register_query_tools(mcp: FastMCP) -> None:
             ctx,
             lambda client: query_service.list_qql_functions(client, kind, function_id),
             instance_key=instance_key,
+            report_progress=True,
         )
 
     _ = (execute_query, compile_query, list_qql_functions)

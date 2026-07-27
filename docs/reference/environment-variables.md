@@ -18,7 +18,7 @@
 | `MCP_PORT` | `8000` | HTTP bind port (1–65535). For stdio, also the loopback port used for interactive OAuth redirect. |
 | `MCP_MAX_CONCURRENT_OPS` | `0` | Max concurrent TimeBase operations (`0` disables limits). |
 | `MCP_MAX_IDLE_CLIENTS` | `0` (auto) | Max idle TimeBase connections per shared pool. `0` = `max(1, MCP_MAX_CONCURRENT_OPS / 2)`. Per-user `forward_identity` pools always use `0`. |
-| `MCP_OPERATION_TIMEOUT_SECONDS` | `0` | Per-operation timeout in seconds (`0` disables). |
+| `MCP_OPERATION_TIMEOUT_SECONDS` | `60` | Per-operation timeout in seconds (`0` disables). |
 | `MCP_AUTH_ISSUER_URL` | discovered | IdP mode: issuer override. Required when TimeBase `/tb/oauthinfo` is empty or for a separate MCP API audience. |
 | `MCP_AUTH_JWKS_URL` | discovered | IdP mode: JWKS URL override. If unset, discovered from `/tb/oauthinfo`. |
 | `MCP_AUTH_AUDIENCE` | None | IdP mode: expected JWT audience/resource. **Required** for IdP inbound auth. |
