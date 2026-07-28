@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.epam/TimeBase-MCP",
+  "title": "TimeBase",
+  "description": "Explore and query TimeBase streams, schemas, QQL, symbols, and server status via MCP.",
+  "websiteUrl": "https://github.com/epam/TimeBase-MCP",
+  "repository": {
+    "url": "https://github.com/epam/TimeBase-MCP",
+    "source": "github"
+  },
+  "version": "__VERSION__",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "timebase-mcp",
+      "version": "__VERSION__",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--from",
+          "value": "timebase-mcp[all]"
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/epam/timebase-mcp:__VERSION__",
+      "runtimeHint": "docker",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-p",
+          "value": "8000:8000",
+          "description": "Publish the MCP HTTP port."
+        }
+      ],
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://127.0.0.1:8000/mcp"
+      }
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 # TimeBase MCP
 
+<!-- mcp-name: io.github.epam/TimeBase-MCP -->
+
 A [Model Context Protocol](https://modelcontextprotocol.io/introduction) server that lets a coding agent (Claude Code, VS Code, Cursor, Claude Desktop, etc.) explore and query [TimeBase](https://kb.timebase.info): list streams, read schemas and symbols, preview messages, run QQL queries, and inspect server status and activity.
 
 The server can run two ways:
