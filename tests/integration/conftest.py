@@ -4,8 +4,7 @@ import os
 from collections.abc import AsyncGenerator
 
 import pytest
-from mcp.client.session import ClientSession
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client import Client
 
 from tests.integration.support import seed_bars_stream, wait_for_timebase
 from timebase_mcp.config.settings import MCPSettings
@@ -43,12 +42,9 @@ def seeded_stream(integration_settings: MCPSettings):
 async def client_session(
     integration_settings: MCPSettings,
     seeded_stream,
-) -> AsyncGenerator[ClientSession]:
+) -> AsyncGenerator[Client]:
     del seeded_stream
 
     server = create_server(integration_settings)
-    async with create_connected_server_and_client_session(
-        server,
-        raise_exceptions=True,
-    ) as session:
+    async with Client(server, raise_exceptions=True) as session:
         yield session

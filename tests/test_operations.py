@@ -1064,8 +1064,6 @@ async def test_run_with_runtime_reports_monotonic_progress_heartbeat(
 async def test_run_with_runtime_stops_when_progress_stream_reports_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Covers the defensive branch in isolation. It does not reproduce a real
-    # streamable-http disconnect, where the SDK swallows the stream error instead.
     monkeypatch.setattr(operations_module, "_PROGRESS_INTERVAL_SECONDS", 0.02)
 
     created_clients: list[StubClient] = []

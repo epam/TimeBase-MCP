@@ -6,7 +6,7 @@ import os
 import types
 from pathlib import Path
 
-import httpx
+import httpx2
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -836,14 +836,14 @@ def test_fetch_oauthinfo_parses_timebase_application_metadata(
 ) -> None:
     instance = _http_instance()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if str(request.url) == "https://tb.example.com:8011/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         if str(request.url) == "https://tb.example.com:8011/tb/oauthinfo":
-            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+            return httpx2.Response(200, json=_timebase_oauthinfo_payload())
         raise AssertionError(f"unexpected URL: {request.url}")
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         monkeypatch.setattr(
             "timebase_mcp.auth.discovery.timebase_http_request",
             lambda instance, endpoint, **kwargs: timebase_http_request(
@@ -868,7 +868,7 @@ def test_fetch_oauthinfo_uses_single_clientid_without_app(
 
     monkeypatch.setattr(
         "timebase_mcp.auth.discovery.timebase_http_request",
-        lambda _instance, _endpoint, **_kwargs: httpx.Response(
+        lambda _instance, _endpoint, **_kwargs: httpx2.Response(
             200,
             json={
                 "issuer": "https://idp.example",
@@ -891,7 +891,7 @@ def test_fetch_oauthinfo_allows_empty_payload_when_auth_not_configured(
 
     monkeypatch.setattr(
         "timebase_mcp.auth.discovery.timebase_http_request",
-        lambda _instance, _endpoint, **_kwargs: httpx.Response(
+        lambda _instance, _endpoint, **_kwargs: httpx2.Response(
             200,
             headers={"content-type": "text/plain"},
             content=b"",
@@ -912,7 +912,7 @@ def test_fetch_oauthinfo_raises_configuration_error_for_non_empty_invalid_json(
 
     monkeypatch.setattr(
         "timebase_mcp.auth.discovery.timebase_http_request",
-        lambda _instance, _endpoint, **_kwargs: httpx.Response(
+        lambda _instance, _endpoint, **_kwargs: httpx2.Response(
             200,
             headers={"content-type": "text/plain"},
             content=b"not-json",
@@ -933,12 +933,12 @@ def test_resolve_interactive_endpoints_tries_https_candidate_and_trusts_all(
     instance = _http_instance(http_base_url=None)
     calls: list[tuple[str, bool]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         if url == "https://tb.example.com:8011/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         if url == "https://tb.example.com:8011/tb/oauthinfo":
-            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+            return httpx2.Response(200, json=_timebase_oauthinfo_payload())
         raise AssertionError(f"unexpected URL: {url}")
 
     def fake_get(url: str, *, timeout: float, verify: bool) -> _DiscoveryResponse:
@@ -956,14 +956,14 @@ def test_resolve_interactive_endpoints_tries_https_candidate_and_trusts_all(
             )
         raise AssertionError(f"unexpected URL: {url}")
 
-    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx.get", fake_get)
+    monkeypatch.setattr("timebase_mcp.auth.discovery.httpx2.get", fake_get)
 
     with (
-        httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        httpx2.Client(transport=httpx2.MockTransport(handler)) as client,
         caplog.at_level(logging.WARNING),
     ):
         monkeypatch.setattr(
-            "timebase_mcp.clients.http.transport.httpx.request",
+            "timebase_mcp.clients.http.transport.httpx2.request",
             lambda method, url, *, timeout, verify, **kwargs: client.request(
                 method,
                 url,
@@ -1003,13 +1003,13 @@ def test_trust_all_warning_emits_once_for_multiple_discovery_calls(
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **_kwargs):
         assert verify is False
         if url == "https://tb.example.com:8011/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         if url == "https://tb.example.com:8011/tb/oauthinfo":
-            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+            return httpx2.Response(200, json=_timebase_oauthinfo_payload())
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     with caplog.at_level(logging.WARNING):
@@ -1030,13 +1030,13 @@ def test_trust_all_warning_not_emitted_when_verification_enabled(
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **_kwargs):
         assert verify is True
         if url == "https://tb.example.com:8011/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         if url == "https://tb.example.com:8011/tb/oauthinfo":
-            return httpx.Response(200, json=_timebase_oauthinfo_payload())
+            return httpx2.Response(200, json=_timebase_oauthinfo_payload())
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     with caplog.at_level(logging.WARNING):
@@ -1350,7 +1350,7 @@ def test_interactive_provider_posts_token_form_with_content_type(
         captured["timeout"] = timeout
         return _Response()
 
-    monkeypatch.setattr("timebase_mcp.auth.interactive.httpx.post", fake_post)
+    monkeypatch.setattr("timebase_mcp.auth.interactive.httpx2.post", fake_post)
 
     token_response = provider._post_token(
         "https://idp.example/token",

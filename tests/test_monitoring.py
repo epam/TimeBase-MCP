@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-import httpx
+import httpx2
 import jwt
 import pytest
 from pydantic import SecretStr
@@ -53,9 +53,9 @@ class _StaticTokenProvider:
         return self.token
 
 
-def _response(url: str, *, method: str = "GET") -> httpx.Response:
-    request = httpx.Request(method, url)
-    parsed = httpx.URL(url)
+def _response(url: str, *, method: str = "GET") -> httpx2.Response:
+    request = httpx2.Request(method, url)
+    parsed = httpx2.URL(url)
     path = parsed.path.split("/tb", 1)[1]
     if parsed.query:
         query = (
@@ -65,9 +65,9 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
         )
         path += "?" + query
     if path == "/oauthinfo":
-        return httpx.Response(200, request=request, content=b"")
+        return httpx2.Response(200, request=request, content=b"")
     if path == "/api/info":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json={
@@ -75,7 +75,7 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             },
         )
     if path == "/api/license":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json={
@@ -92,7 +92,7 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             },
         )
     if path == "/api/server/security":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json={
@@ -101,7 +101,7 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             },
         )
     if path == "/api/server/system?gc=false":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json={
@@ -122,7 +122,7 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             },
         )
     if path == "/api/cursors":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json=[
@@ -139,7 +139,7 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             ],
         )
     if path == "/api/loaders":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json=[
@@ -157,7 +157,7 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             ],
         )
     if path == "/api/connections":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json=[
@@ -173,7 +173,7 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             ],
         )
     if path == "/api/locks":
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             json=[
@@ -190,18 +190,18 @@ def _response(url: str, *, method: str = "GET") -> httpx.Response:
             ],
         )
     if path == "/api/cursors/1":
-        return httpx.Response(
+        return httpx2.Response(
             200, request=request, json={"id": 1, "instrumentCount": 10}
         )
     if path == "/api/cursors/1/instruments?offset=5&limit=10&filter=AAPL":
-        return httpx.Response(
+        return httpx2.Response(
             200, request=request, json={"offset": 5, "limit": 10, "items": []}
         )
     if path == "/api/connections/c1":
-        return httpx.Response(
+        return httpx2.Response(
             200, request=request, json={"clientId": "c1", "channels": []}
         )
-    return httpx.Response(404, request=request, json={"message": "not found"})
+    return httpx2.Response(404, request=request, json={"message": "not found"})
 
 
 @pytest.fixture(autouse=True)
@@ -210,7 +210,7 @@ def _mock_http(monkeypatch: pytest.MonkeyPatch) -> None:
         return _response(url, method=method)
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
 
@@ -245,7 +245,7 @@ async def test_get_timebase_status_uses_configured_http_auth(
         return _response(url, method=method)
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     status = await get_timebase_status(_basic_auth_runtime())
@@ -283,9 +283,9 @@ async def test_get_timebase_status_auto_discovers_oauth_and_uses_bearer(
         calls.append(url)
         if url == "http://tb.example.com:8021/tb/oauthinfo":
             assert "headers" not in kwargs or "Authorization" not in kwargs["headers"]
-            return httpx.Response(
+            return httpx2.Response(
                 200,
-                request=httpx.Request(method, url),
+                request=httpx2.Request(method, url),
                 json={"issuer": "https://idp.example"},
             )
         if url != "http://tb.example.com:8021/tb/ping":
@@ -293,7 +293,7 @@ async def test_get_timebase_status_auto_discovers_oauth_and_uses_bearer(
         return _response(url, method=method)
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     status = await get_timebase_status(runtime)
@@ -310,13 +310,13 @@ async def test_get_timebase_status_warns_when_license_fails(
 ) -> None:
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **kwargs):
         if url.endswith("/tb/api/license") or url.endswith("/tb/api/server/security"):
-            return httpx.Response(
-                500, request=httpx.Request(method, url), json={"message": "boom"}
+            return httpx2.Response(
+                500, request=httpx2.Request(method, url), json={"message": "boom"}
             )
         return _response(url, method=method)
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     status = await get_timebase_status(_runtime())
@@ -335,17 +335,17 @@ async def test_get_timebase_status_reports_missing_monitor_api_after_connection_
 
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **kwargs):
         calls.append(url)
-        request = httpx.Request(method, url)
+        request = httpx2.Request(method, url)
         if url == "http://tb.example.com:8021/tb/ping":
-            return httpx.Response(200, request=request)
+            return httpx2.Response(200, request=request)
         if url == "http://tb.example.com:8021/tb/oauthinfo":
-            return httpx.Response(200, request=request, content=b"")
+            return httpx2.Response(200, request=request, content=b"")
         if url == "http://tb.example.com:8021/tb/api/info":
-            return httpx.Response(404, request=request, json={"message": "not found"})
+            return httpx2.Response(404, request=request, json={"message": "not found"})
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     with pytest.raises(TimeBaseOperationError) as exc_info:
@@ -377,17 +377,17 @@ async def test_list_timebase_activity_reports_warnings_when_monitor_api_is_unava
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **kwargs):
-        request = httpx.Request(method, url)
+        request = httpx2.Request(method, url)
         if url == "http://tb.example.com:8021/tb/ping":
-            return httpx.Response(200, request=request)
+            return httpx2.Response(200, request=request)
         if url == "http://tb.example.com:8021/tb/oauthinfo":
-            return httpx.Response(200, request=request, content=b"")
+            return httpx2.Response(200, request=request, content=b"")
         if url.startswith("http://tb.example.com:8021/tb/api/"):
-            return httpx.Response(404, request=request, json={"message": "not found"})
+            return httpx2.Response(404, request=request, json={"message": "not found"})
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     activity = await list_timebase_activity(_runtime(), kind="all", limit=10)
@@ -438,7 +438,7 @@ async def test_monitoring_uses_operation_budget(
         return _response(url, method=method)
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
 
     import asyncio
