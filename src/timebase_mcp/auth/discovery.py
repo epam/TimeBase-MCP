@@ -4,12 +4,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import httpx
+import httpx2
 
 from timebase_mcp.errors import ConfigurationError
 from timebase_mcp.clients.http.transport import (
     HTTP_DISCOVERY_TIMEOUT_SECONDS,
-    httpx_verify,
+    tls_verify,
     timebase_http_request,
 )
 
@@ -50,17 +50,17 @@ class InteractiveEndpoints:
 
 
 def _get_json(url: str, *, allow_empty: bool = False) -> dict[str, Any]:
-    response = httpx.get(
+    response = httpx2.get(
         url,
         timeout=HTTP_DISCOVERY_TIMEOUT_SECONDS,
-        verify=httpx_verify(),
+        verify=tls_verify(),
     )
     response.raise_for_status()
     return _response_json(response, allow_empty=allow_empty, source=url)
 
 
 def _response_json(
-    response: httpx.Response,
+    response: httpx2.Response,
     *,
     allow_empty: bool = False,
     source: str | None = None,
@@ -83,7 +83,7 @@ def _response_json(
     return payload
 
 
-def _response_url(response: httpx.Response) -> str:
+def _response_url(response: httpx2.Response) -> str:
     try:
         return str(response.url)
     except RuntimeError:
@@ -143,7 +143,7 @@ def fetch_oauthinfo(instance: TimeBaseInstanceRuntime) -> OAuthInfo:
     try:
         response = timebase_http_request(instance, "/oauthinfo", auth=False)
         payload = _response_json(response, allow_empty=True)
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         raise ConfigurationError(
             f"Failed to fetch TimeBase OAuth metadata for instance "
             f"'{instance.key}': {exc}"
@@ -168,7 +168,7 @@ def fetch_oidc_metadata(issuer: str) -> dict[str, Any]:
     url = issuer.rstrip("/") + "/.well-known/openid-configuration"
     try:
         return _get_json(url)
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         raise ConfigurationError(
             f"Failed to fetch OpenID configuration from {url}: {exc}"
         ) from exc

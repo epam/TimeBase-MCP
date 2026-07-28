@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
+import httpx2
 
 from timebase_mcp.auth.outbound import (
     build_http_auth_headers,
@@ -25,7 +25,7 @@ HTTP_PING_TIMEOUT_SECONDS = 2.0
 _trust_all_warning_emitted = False
 
 
-def httpx_verify() -> bool:
+def tls_verify() -> bool:
     """Return the TLS verification flag for TimeBase HTTP calls."""
     if not dxapi_ssl_trust_all_enabled():
         return True
@@ -43,7 +43,7 @@ def httpx_verify() -> bool:
 def get_http_base_url(
     instance: TimeBaseInstanceRuntime,
     *,
-    client: httpx.Client | None = None,
+    client: httpx2.Client | None = None,
     timeout: float = HTTP_PING_TIMEOUT_SECONDS,
     force_refresh: bool = False,
     exclude_http_base_url: str | None = None,
@@ -77,11 +77,11 @@ def timebase_http_request(
     endpoint: str,
     *,
     method: str = "GET",
-    client: httpx.Client | None = None,
+    client: httpx2.Client | None = None,
     timeout: float = HTTP_DISCOVERY_TIMEOUT_SECONDS,
     auth: bool = True,
     **kwargs: Any,
-) -> httpx.Response:
+) -> httpx2.Response:
     """Make a request to TimeBase's HTTP API."""
     failed_base_url = instance.resolved_http_base_url
     try:
@@ -94,7 +94,7 @@ def timebase_http_request(
             auth=auth,
             **kwargs,
         )
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         instance.clear_http_base_url()
         return _timebase_http_request(
             instance,
@@ -134,12 +134,12 @@ def _timebase_http_request(
     endpoint: str,
     *,
     method: str,
-    client: httpx.Client | None,
+    client: httpx2.Client | None,
     timeout: float,
     exclude_http_base_url: str | None = None,
     auth: bool = True,
     **kwargs: Any,
-) -> httpx.Response:
+) -> httpx2.Response:
     http_base_url = get_http_base_url(
         instance,
         client=client,
@@ -147,7 +147,7 @@ def _timebase_http_request(
         exclude_http_base_url=exclude_http_base_url,
     )
     if http_base_url is None:
-        raise httpx.ConnectError(
+        raise httpx2.ConnectError(
             f"Cannot resolve TimeBase HTTP API URL for instance '{instance.key}'."
         )
 
@@ -179,17 +179,17 @@ def _http_request(
     method: str,
     url: str,
     *,
-    client: httpx.Client | None,
+    client: httpx2.Client | None,
     timeout: float,
     **kwargs: Any,
-) -> httpx.Response:
+) -> httpx2.Response:
     if client is not None:
         return client.request(method, url, timeout=timeout, **kwargs)
-    return httpx.request(
+    return httpx2.request(
         method,
         url,
         timeout=timeout,
-        verify=httpx_verify(),
+        verify=tls_verify(),
         **kwargs,
     )
 
@@ -198,7 +198,7 @@ def _is_reachable(
     http_base_url: str,
     endpoint: str,
     *,
-    client: httpx.Client | None,
+    client: httpx2.Client | None,
     timeout: float,
 ) -> bool:
     url = build_tb_url(http_base_url, endpoint)
@@ -209,6 +209,6 @@ def _is_reachable(
             client=client,
             timeout=timeout,
         )
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         return False
     return 200 <= response.status_code < 300 or response.status_code in (401, 403)
