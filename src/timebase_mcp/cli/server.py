@@ -4,7 +4,7 @@ import json
 import logging
 import signal
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import FrameType
 
@@ -66,7 +66,7 @@ def _raise_keyboard_interrupt(_signum: int, _frame: FrameType | None) -> None:
 
 
 @contextmanager
-def immediate_sigint_handler() -> Iterator[None]:
+def immediate_sigint_handler() -> Generator[None]:
     try:
         previous_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, _raise_keyboard_interrupt)

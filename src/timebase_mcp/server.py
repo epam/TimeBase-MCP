@@ -1,5 +1,5 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from mcp.server.auth.provider import TokenVerifier
@@ -52,7 +52,9 @@ def create_server(settings: MCPSettings) -> FastMCP[TimeBaseRuntime]:
     runtime = build_runtime(settings)
 
     @asynccontextmanager
-    async def lifespan(_: FastMCP[TimeBaseRuntime]) -> AsyncIterator[TimeBaseRuntime]:
+    async def lifespan(
+        _: MCPServer[TimeBaseRuntime],
+    ) -> AsyncGenerator[TimeBaseRuntime]:
         try:
             yield runtime
         finally:
