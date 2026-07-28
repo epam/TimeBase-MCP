@@ -8,7 +8,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from types import FrameType
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from pydantic import ValidationError
 
 from timebase_mcp.cli.logging import configure_logging
@@ -47,7 +47,7 @@ def load_settings() -> MCPSettings:
         raise ConfigurationError("Invalid TimeBase MCP configuration.") from exc
 
 
-def build_server(settings: MCPSettings | None = None) -> FastMCP:
+def build_server(settings: MCPSettings | None = None) -> MCPServer:
     effective_settings = settings or load_settings()
     return create_server(effective_settings)
 
@@ -102,7 +102,14 @@ def run_server() -> int:
             if active_settings.transport == "stdio" and should_log_terminal_status():
                 logger.info(_STDIO_STARTUP_MESSAGE)
 
-            active_server.run(transport=active_settings.transport)
+            if active_settings.transport == "stdio":
+                active_server.run(transport="stdio")
+            else:
+                active_server.run(
+                    transport=active_settings.transport,
+                    host=active_settings.host,
+                    port=active_settings.port,
+                )
     except KeyboardInterrupt:
         if active_settings.transport == "stdio" and should_log_terminal_status():
             logger.info("TimeBase MCP server stopped.")

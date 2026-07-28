@@ -1,18 +1,17 @@
 from urllib.parse import unquote
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-from timebase_mcp.runtime.operations import run_with_context
+from timebase_mcp.runtime.operations import run_with_runtime
+from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.services import streams as stream_service
 
 
-def register_resources(mcp: FastMCP) -> None:
+def register_resources(mcp: MCPServer, runtime: TimeBaseRuntime) -> None:
     """Register stable TimeBase metadata resources."""
 
     async def _run_resource_operation(operation, *, instance_key: str | None = None):
-        return await run_with_context(
-            mcp.get_context(), operation, instance_key=instance_key
-        )
+        return await run_with_runtime(runtime, operation, instance_key=instance_key)
 
     @mcp.resource(
         "timebase://streams",

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from timebase_mcp.auth.inbound import build_inbound_auth
 from timebase_mcp.config.settings import MCPSettings
@@ -48,7 +48,7 @@ def _resolve_inbound_auth(
     return None, None
 
 
-def create_server(settings: MCPSettings) -> FastMCP[TimeBaseRuntime]:
+def create_server(settings: MCPSettings) -> MCPServer[TimeBaseRuntime]:
     runtime = build_runtime(settings)
 
     @asynccontextmanager
@@ -62,16 +62,14 @@ def create_server(settings: MCPSettings) -> FastMCP[TimeBaseRuntime]:
 
     auth_settings, token_verifier = _resolve_inbound_auth(settings, runtime)
 
-    mcp = FastMCP(
+    mcp = MCPServer(
         name=APP_NAME,
         instructions=SERVER_INSTRUCTIONS,
-        host=settings.host,
-        port=settings.port,
         log_level=settings.log_level,
         lifespan=lifespan,
         auth=auth_settings,
         token_verifier=token_verifier,
     )
     register_tools(mcp)
-    register_resources(mcp)
+    register_resources(mcp, runtime)
     return mcp

@@ -5,8 +5,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 import anyio
-from mcp.server.fastmcp import Context
-from mcp.server.session import ServerSession
+from mcp.server.mcpserver import Context
 
 from timebase_mcp.auth.principal import current_principal
 from timebase_mcp.clients.base import TimeBaseClient
@@ -59,7 +58,7 @@ async def run_with_runtime(
     operation: Callable[[TimeBaseClient], ResultT],
     *,
     instance_key: str | None = None,
-    progress_ctx: Context[ServerSession, TimeBaseRuntime] | None = None,
+    progress_ctx: Context[TimeBaseRuntime] | None = None,
 ) -> ResultT:
     """Run a TimeBase operation against a resolved runtime instance."""
     try:
@@ -163,7 +162,7 @@ async def run_with_runtime(
 
 
 async def run_with_context(
-    ctx: Context[ServerSession, TimeBaseRuntime],
+    ctx: Context[TimeBaseRuntime],
     operation: Callable[[TimeBaseClient], ResultT],
     *,
     instance_key: str | None = None,
@@ -295,7 +294,7 @@ async def _escalate_to_interrupt(
 
 
 async def _pump_progress(
-    ctx: Context[ServerSession, TimeBaseRuntime],
+    ctx: Context[TimeBaseRuntime],
     client: TimeBaseClient,
     operation_future: asyncio.Future[ResultT],
 ) -> None:
@@ -317,9 +316,6 @@ async def _pump_progress(
 
         try:
             await ctx.report_progress(progress=float(tick), message=message)
-        # Does not fire on a streamable-http disconnect: the SDK's message
-        # router swallows the stream error on its own task, so a dropped client is
-        # bounded by the operation timeout. SDK v2 should surface it.
         except (anyio.ClosedResourceError, anyio.BrokenResourceError):
             logger.info("Progress stream closed, stopping the operation.")
             client.request_cancel()

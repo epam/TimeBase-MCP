@@ -1,8 +1,7 @@
 from typing import Literal
 
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.session import ServerSession
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver import Context, MCPServer
+from mcp_types import ToolAnnotations
 from pydantic import Field
 
 from timebase_mcp.models.core import MCPServerConfiguration, TimeBaseInstanceInfo
@@ -27,19 +26,19 @@ from timebase_mcp.tools.common import InstanceName
 _LIMITED_SERVER_SUPPORT_NOTE = "Limited TimeBase server versions support."
 
 
-def register_system_tools(mcp: FastMCP) -> None:
+def register_system_tools(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="list_timebase_instances",
         description="List configured TimeBase server instances.",
         annotations=ToolAnnotations(
             title="List TimeBase instances",
-            readOnlyHint=True,
-            openWorldHint=False,
+            read_only_hint=True,
+            open_world_hint=False,
         ),
     )
     async def list_timebase_instances(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
     ) -> list[TimeBaseInstanceInfo]:
         runtime = ctx.request_context.lifespan_context
         return [
@@ -57,12 +56,12 @@ def register_system_tools(mcp: FastMCP) -> None:
         "have default value until the first connection is established.",
         annotations=ToolAnnotations(
             title="Get MCP server configuration",
-            readOnlyHint=True,
-            openWorldHint=False,
+            read_only_hint=True,
+            open_world_hint=False,
         ),
     )
     async def get_server_configuration(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
     ) -> MCPServerConfiguration:
         runtime = ctx.request_context.lifespan_context
         return build_server_configuration(runtime)
@@ -75,12 +74,12 @@ def register_system_tools(mcp: FastMCP) -> None:
         ),
         annotations=ToolAnnotations(
             title="Get TimeBase status",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def get_timebase_status(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
     ) -> TimeBaseStatus:
         runtime = ctx.request_context.lifespan_context
@@ -94,12 +93,12 @@ def register_system_tools(mcp: FastMCP) -> None:
         ),
         annotations=ToolAnnotations(
             title="List TimeBase activity",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def list_timebase_activity(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
         kind: Literal["all", "cursors", "loaders", "connections", "locks"] = Field(
             default="all",
@@ -128,12 +127,12 @@ def register_system_tools(mcp: FastMCP) -> None:
         ),
         annotations=ToolAnnotations(
             title="Get TimeBase activity detail",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def get_timebase_activity_detail(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         kind: Literal["cursor", "loader", "connection", "lock"] = Field(
             description="Activity object kind to inspect.",
         ),
