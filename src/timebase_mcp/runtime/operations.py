@@ -5,8 +5,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 import anyio
-from mcp.server.fastmcp import Context
-from mcp.server.session import ServerSession
+from mcp.server.mcpserver import Context
 
 from timebase_mcp.auth.principal import current_principal
 from timebase_mcp.clients.base import TimeBaseClient
@@ -14,6 +13,7 @@ from timebase_mcp.constants import SHARED_PRINCIPAL_KEY
 from timebase_mcp.errors import (
     TimeBaseConnectionError,
     TimeBaseMCPError,
+    TimeBaseOperationCancelledError,
     TimeBaseOperationError,
     TimeBaseOperationStateError,
     TimeBaseOperationTimeoutError,
@@ -59,7 +59,7 @@ async def run_with_runtime(
     operation: Callable[[TimeBaseClient], ResultT],
     *,
     instance_key: str | None = None,
-    progress_ctx: Context[ServerSession, TimeBaseRuntime] | None = None,
+    progress_ctx: Context[TimeBaseRuntime] | None = None,
 ) -> ResultT:
     """Run a TimeBase operation against a resolved runtime instance."""
     try:
@@ -90,15 +90,8 @@ async def run_with_runtime(
             )
 
         if timeout_seconds > 0:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.shield(operation_future),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError as exc:
-                if operation_future.done():
-                    return await operation_future
-
+            done, _ = await asyncio.wait({operation_future}, timeout=timeout_seconds)
+            if not done and not operation_future.done():
                 release_lease_in_background = _begin_stop(
                     lease,
                     operation_future,
@@ -107,9 +100,11 @@ async def run_with_runtime(
                 )
                 raise TimeBaseOperationTimeoutError(
                     f"TimeBase operation timed out after {timeout_seconds} seconds."
-                ) from exc
+                )
+        else:
+            await asyncio.wait({operation_future})
 
-        return await asyncio.shield(operation_future)
+        return operation_future.result()
     except asyncio.CancelledError:
         # We are inside an already-cancelled scope, so we must not await here:
         # anyio re-cancels awaits made in a cancelled scope, which would skip
@@ -163,7 +158,7 @@ async def run_with_runtime(
 
 
 async def run_with_context(
-    ctx: Context[ServerSession, TimeBaseRuntime],
+    ctx: Context[TimeBaseRuntime],
     operation: Callable[[TimeBaseClient], ResultT],
     *,
     instance_key: str | None = None,
@@ -224,34 +219,37 @@ async def _finalize_stopped_operation(
     """
     started = time.monotonic()
     try:
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(operation_future),
-                timeout=_COOPERATIVE_STOP_GRACE_SECONDS,
-            )
-        except TimeoutError:
+        done, _ = await asyncio.wait(
+            {operation_future},
+            timeout=_COOPERATIVE_STOP_GRACE_SECONDS,
+        )
+        if not done:
             await _escalate_to_interrupt(
                 operation_future,
                 lease,
                 instance_key=instance_key,
                 reason=reason,
             )
-        except Exception:
+            return
+
+        error = operation_future.exception()
+        if error is not None and not isinstance(error, TimeBaseOperationCancelledError):
             lease.mark_broken()
             logger.debug(
                 "TimeBase operation for instance %s raised while stopping (%s).",
                 instance_key,
                 reason,
-                exc_info=True,
+                exc_info=error,
             )
-        else:
-            logger.info(
-                "TimeBase operation for instance %s stopped cooperatively in %.2fs "
-                "(%s), connection reused.",
-                instance_key,
-                time.monotonic() - started,
-                reason,
-            )
+            return
+
+        logger.info(
+            "TimeBase operation for instance %s stopped cooperatively in %.2fs "
+            "(%s), connection reused.",
+            instance_key,
+            time.monotonic() - started,
+            reason,
+        )
     finally:
         await lease.aclose()
 
@@ -295,7 +293,7 @@ async def _escalate_to_interrupt(
 
 
 async def _pump_progress(
-    ctx: Context[ServerSession, TimeBaseRuntime],
+    ctx: Context[TimeBaseRuntime],
     client: TimeBaseClient,
     operation_future: asyncio.Future[ResultT],
 ) -> None:
@@ -317,13 +315,6 @@ async def _pump_progress(
 
         try:
             await ctx.report_progress(progress=float(tick), message=message)
-        # Does not fire on a streamable-http disconnect: the SDK's message
-        # router swallows the stream error on its own task, so a dropped client is
-        # bounded by the operation timeout. SDK v2 should surface it.
-        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
-            logger.info("Progress stream closed, stopping the operation.")
-            client.request_cancel()
-            return
         except Exception:
             logger.debug(
                 "Progress reporting failed, stopping progress updates.",

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
+import httpx2
 
 
 def response_json_dict(
-    response: httpx.Response,
+    response: httpx2.Response,
     *,
     error_factory: type[Exception] = ValueError,
     what: str = "response",
@@ -21,7 +21,7 @@ def response_json_dict(
 
 
 def response_json_list(
-    response: httpx.Response,
+    response: httpx2.Response,
     *,
     error_factory: type[Exception] = ValueError,
     what: str = "response",

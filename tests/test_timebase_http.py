@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from base64 import b64encode
 
-import httpx
+import httpx2
 import pytest
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
@@ -129,14 +129,14 @@ def test_derive_http_base_urls_prefers_https_for_ssl_scheme() -> None:
 def test_get_http_base_url_uses_8021_when_same_port_fails() -> None:
     instance = _http_instance(http_base_url=None)
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if str(request.url) == "http://tb.example.com:8011/tb/ping":
-            return httpx.Response(404)
+            return httpx2.Response(404)
         if str(request.url) == "http://tb.example.com:8021/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         raise AssertionError(f"unexpected URL: {request.url}")
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         http_base_url = get_http_base_url(
             instance,
             client=client,
@@ -149,11 +149,11 @@ def test_get_http_base_url_uses_8021_when_same_port_fails() -> None:
 def test_get_http_base_url_treats_unauthorized_ping_as_reachable() -> None:
     instance = _http_instance(http_base_url="https://tb.example.com:8021")
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert str(request.url) == "https://tb.example.com:8021/tb/ping"
-        return httpx.Response(403)
+        return httpx2.Response(403)
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         http_base_url = get_http_base_url(
             instance,
             client=client,
@@ -165,14 +165,14 @@ def test_get_http_base_url_treats_unauthorized_ping_as_reachable() -> None:
 def test_timebase_http_request_builds_tb_url() -> None:
     instance = _http_instance(http_base_url="https://example.com/tb")
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if str(request.url) == "https://example.com/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         assert request.method == "POST"
         assert str(request.url) == "https://example.com/tb/api/info"
-        return httpx.Response(200, json={"ok": True})
+        return httpx2.Response(200, json={"ok": True})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         response = timebase_http_request(
             instance,
             "/api/info",
@@ -188,13 +188,13 @@ def test_timebase_http_request_reuses_cached_http_url() -> None:
     instance = _http_instance(http_base_url="https://example.com/tb")
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(str(request.url))
         if str(request.url) == "https://example.com/tb/ping":
-            return httpx.Response(200)
-        return httpx.Response(200)
+            return httpx2.Response(200)
+        return httpx2.Response(200)
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         timebase_http_request(instance, "/api/info", client=client)
         timebase_http_request(instance, "/api/connections", client=client)
 
@@ -212,16 +212,16 @@ def test_timebase_http_request_checks_ping_on_endpoint_404() -> None:
     )
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         calls.append(url)
         if url == "http://tb.example.com:8011/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         if url == "http://tb.example.com:8011/tb/api/info":
-            return httpx.Response(404)
+            return httpx2.Response(404)
         raise AssertionError(f"unexpected URL: {url}")
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         instance.resolved_http_base_url = "http://tb.example.com:8011"
         response = timebase_http_request(
             instance,
@@ -244,20 +244,20 @@ def test_timebase_http_request_retries_endpoint_404_when_ping_finds_new_base() -
     )
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         calls.append(url)
         if url == "http://tb.example.com:8011/tb/api/info":
-            return httpx.Response(404)
+            return httpx2.Response(404)
         if url == "http://tb.example.com:8011/tb/ping":
-            return httpx.Response(404)
+            return httpx2.Response(404)
         if url == "http://tb.example.com:8021/tb/ping":
-            return httpx.Response(200)
+            return httpx2.Response(200)
         if url == "http://tb.example.com:8021/tb/api/info":
-            return httpx.Response(200, json={"ok": True})
+            return httpx2.Response(200, json={"ok": True})
         raise AssertionError(f"unexpected URL: {url}")
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         instance.resolved_http_base_url = "http://tb.example.com:8011"
         response = timebase_http_request(
             instance,
@@ -288,14 +288,14 @@ def test_timebase_http_request_sends_basic_auth_header() -> None:
     )
     expected = "Basic " + b64encode(b"alice:secret").decode("ascii")
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if str(request.url) == "https://tb.example.com:8021/tb/ping":
             assert "authorization" not in request.headers
-            return httpx.Response(200)
+            return httpx2.Response(200)
         assert request.headers["authorization"] == expected
-        return httpx.Response(200, json={"ok": True})
+        return httpx2.Response(200, json={"ok": True})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         response = timebase_http_request(instance, "/api/info", client=client)
 
     assert response.json() == {"ok": True}
@@ -317,14 +317,14 @@ def test_timebase_http_request_sends_oauth2_bearer_from_shared_provider() -> Non
     provider = _StaticTokenProvider("service-token")
     instance.oauth2_provider = provider
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if str(request.url) == "https://tb.example.com:8021/tb/ping":
             assert "authorization" not in request.headers
-            return httpx.Response(200)
+            return httpx2.Response(200)
         assert request.headers["authorization"] == "Bearer service-token"
-        return httpx.Response(200, json={"ok": True})
+        return httpx2.Response(200, json={"ok": True})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         timebase_http_request(instance, "/api/info", client=client)
         timebase_http_request(instance, "/api/connections", client=client)
 
@@ -344,11 +344,11 @@ def test_timebase_http_request_does_not_auth_ping_or_explicit_no_auth() -> None:
     )
     calls: list[tuple[str, str | None]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append((str(request.url), request.headers.get("authorization")))
-        return httpx.Response(200, json={})
+        return httpx2.Response(200, json={})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
         timebase_http_request(instance, "/oauthinfo", client=client, auth=False)
 
     assert calls == [
@@ -367,12 +367,12 @@ def test_timebase_http_request_sends_forwarded_identity_bearer() -> None:
         ),
     )
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if str(request.url) == "https://tb.example.com:8021/tb/ping":
             assert "authorization" not in request.headers
-            return httpx.Response(200)
+            return httpx2.Response(200)
         assert request.headers["authorization"] == "Bearer caller-token"
-        return httpx.Response(200, json={"ok": True})
+        return httpx2.Response(200, json={"ok": True})
 
     access = AccessToken(
         token="caller-token",
@@ -383,7 +383,7 @@ def test_timebase_http_request_sends_forwarded_identity_bearer() -> None:
     )
     reset = auth_context_var.set(AuthenticatedUser(access))
     try:
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
             response = timebase_http_request(instance, "/api/info", client=client)
     finally:
         auth_context_var.reset(reset)

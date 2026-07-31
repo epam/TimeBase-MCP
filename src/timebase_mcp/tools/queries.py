@@ -1,8 +1,7 @@
 from typing import Literal
 
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.session import ServerSession
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver import Context, MCPServer
+from mcp_types import ToolAnnotations
 from pydantic import Field
 
 from timebase_mcp.models.core import CompileQQLResult, QQLFunctionsResult
@@ -12,21 +11,21 @@ from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.tools.common import InstanceName
 
 
-def register_query_tools(mcp: FastMCP) -> None:
+def register_query_tools(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="execute_query",
         description="Execute a TimeBase QQL query",
         annotations=ToolAnnotations(
             title="Execute TimeBase QQL query",
-            readOnlyHint=False,
-            destructiveHint=True,
-            idempotentHint=False,
-            openWorldHint=True,
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
+            open_world_hint=True,
         ),
     )
     async def execute_query(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
         query: str = Field(description="TimeBase QQL query text"),
         limit: int = Field(
@@ -52,12 +51,12 @@ def register_query_tools(mcp: FastMCP) -> None:
         ),
         annotations=ToolAnnotations(
             title="Compile TimeBase QQL query",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def compile_query(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
         query: str = Field(description="TimeBase QQL query text"),
     ) -> CompileQQLResult:
@@ -74,12 +73,12 @@ def register_query_tools(mcp: FastMCP) -> None:
         ),
         annotations=ToolAnnotations(
             title="List available TimeBase QQL function signatures",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def list_qql_functions(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
         kind: Literal["all", "stateless", "stateful"] = Field(
             default="all",

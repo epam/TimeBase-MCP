@@ -1,22 +1,26 @@
+import asyncio
 import logging
+import threading
+import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
-import httpx
+import httpx2
 import pytest
 from inline_snapshot import snapshot
-from mcp.client.session import ClientSession
-from mcp.shared.exceptions import McpError
-from mcp.shared.memory import create_connected_server_and_client_session
-from mcp.types import TextContent, TextResourceContents
-from pydantic import AnyUrl, SecretStr, TypeAdapter
+from mcp.client import Client
+from mcp.shared.exceptions import MCPError
+from mcp_types import TextContent, TextResourceContents
+from pydantic import SecretStr
 
+import timebase_mcp.runtime.operations as operations_module
 from timebase_mcp import resources as resources_module
 from timebase_mcp.clients import factory as client_factory
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import (
+    TimeBaseOperationCancelledError,
     TimeBaseOperationError,
     TimeBaseOperationLimitError,
     TimeBaseOperationTimeoutError,
@@ -36,11 +40,12 @@ class _StubStream:
     description: str | None = None
 
 
-_RESOURCE_URI_ADAPTER = TypeAdapter(AnyUrl)
-
-
-def _resource_uri(value: str) -> AnyUrl:
-    return _RESOURCE_URI_ADAPTER.validate_python(value)
+def _resource_text(result) -> list[str]:
+    return [
+        content.text
+        for content in result.contents
+        if isinstance(content, TextResourceContents)
+    ]
 
 
 def test_remote_unauthenticated_bind_logs_warning(
@@ -66,16 +71,13 @@ def anyio_backend() -> str:
 @pytest.fixture
 def client_session_factory() -> Callable[
     [MCPSettings | None],
-    AbstractAsyncContextManager[ClientSession],
+    AbstractAsyncContextManager[Client],
 ]:
     def build(
         settings: MCPSettings | None = None,
-    ) -> AbstractAsyncContextManager[ClientSession]:
+    ) -> AbstractAsyncContextManager[Client]:
         server = create_server(settings or MCPSettings())
-        return create_connected_server_and_client_session(
-            server,
-            raise_exceptions=True,
-        )
+        return Client(server, raise_exceptions=True)
 
     return build
 
@@ -84,16 +86,16 @@ def client_session_factory() -> Callable[
 async def client_session(
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
-) -> AsyncGenerator[ClientSession]:
+) -> AsyncGenerator[Client]:
     async with client_session_factory(None) as session:
         yield session
 
 
 @pytest.mark.anyio
 async def test_list_tools_resources_and_templates(
-    client_session: ClientSession,
+    client_session: Client,
 ) -> None:
     tools_result = await client_session.list_tools()
     resources_result = await client_session.list_resources()
@@ -120,78 +122,78 @@ async def test_list_tools_resources_and_templates(
     )
     assert {
         tool.name: {
-            "readOnlyHint": None
+            "read_only_hint": None
             if tool.annotations is None
-            else tool.annotations.readOnlyHint,
-            "openWorldHint": None
+            else tool.annotations.read_only_hint,
+            "open_world_hint": None
             if tool.annotations is None
-            else tool.annotations.openWorldHint,
+            else tool.annotations.open_world_hint,
         }
         for tool in tools_result.tools
     } == snapshot(
         {
             "list_timebase_instances": {
-                "readOnlyHint": True,
-                "openWorldHint": False,
+                "read_only_hint": True,
+                "open_world_hint": False,
             },
             "get_server_configuration": {
-                "readOnlyHint": True,
-                "openWorldHint": False,
+                "read_only_hint": True,
+                "open_world_hint": False,
             },
             "get_timebase_status": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "list_timebase_activity": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "get_timebase_activity_detail": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "list_streams": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "get_stream_schema": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "get_stream_time_range": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "list_stream_spaces": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "get_stream_space_time_range": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
             "get_stream_symbols": {
-                "readOnlyHint": True,
-                "openWorldHint": True,
+                "read_only_hint": True,
+                "open_world_hint": True,
             },
-            "get_stream_messages": {"readOnlyHint": True, "openWorldHint": True},
-            "execute_query": {"readOnlyHint": False, "openWorldHint": True},
-            "compile_query": {"readOnlyHint": True, "openWorldHint": True},
-            "list_qql_functions": {"readOnlyHint": True, "openWorldHint": True},
+            "get_stream_messages": {"read_only_hint": True, "open_world_hint": True},
+            "execute_query": {"read_only_hint": False, "open_world_hint": True},
+            "compile_query": {"read_only_hint": True, "open_world_hint": True},
+            "list_qql_functions": {"read_only_hint": True, "open_world_hint": True},
         }
     )
-    assert "instance_key" not in tools_result.tools[1].inputSchema["properties"]
-    assert "instance_key" in tools_result.tools[2].inputSchema["properties"]
+    assert "instance_key" not in tools_result.tools[1].input_schema["properties"]
+    assert "instance_key" in tools_result.tools[2].input_schema["properties"]
     assert [resource.name for resource in resources_result.resources] == snapshot(
         ["stream_catalog"]
     )
     assert [
-        template.name for template in templates_result.resourceTemplates
+        template.name for template in templates_result.resource_templates
     ] == snapshot(
         ["stream_schema", "instance_stream_catalog", "instance_stream_schema"]
     )
     assert [
-        template.uriTemplate for template in templates_result.resourceTemplates
+        template.uri_template for template in templates_result.resource_templates
     ] == snapshot(
         [
             "timebase://streams/{stream_key}/schema",
@@ -206,14 +208,12 @@ async def test_read_resources_return_expected_text(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_resource(
-        _ctx, operation, *, instance_key=None, report_progress=False
-    ):
+    async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
         class StubClient:
@@ -228,20 +228,16 @@ async def test_read_resources_return_expected_text(
 
         return operation(StubClient())
 
-    monkeypatch.setattr(resources_module, "run_with_context", run_resource)
+    monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
 
     async with client_session_factory(None) as client_session:
-        catalog = await client_session.read_resource(
-            _resource_uri("timebase://streams")
-        )
-        schema = await client_session.read_resource(
-            _resource_uri("timebase://streams/bars/schema")
-        )
+        catalog = await client_session.read_resource("timebase://streams")
+        schema = await client_session.read_resource("timebase://streams/bars/schema")
         instance_catalog = await client_session.read_resource(
-            _resource_uri("timebase://instances/dev/streams")
+            "timebase://instances/dev/streams"
         )
         instance_schema = await client_session.read_resource(
-            _resource_uri("timebase://instances/dev/streams/bars/schema")
+            "timebase://instances/dev/streams/bars/schema"
         )
 
     catalog_text = [
@@ -276,23 +272,17 @@ async def test_read_resources_return_expected_text(
 async def test_read_resource_surfaces_operation_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fail_resource(
-        _ctx, _operation, *, instance_key=None, report_progress=False
-    ):
+    async def fail_resource(_runtime, _operation, *, instance_key=None):
         raise TimeBaseOperationError("resource failed")
 
-    monkeypatch.setattr(resources_module, "run_with_context", fail_resource)
+    monkeypatch.setattr(resources_module, "run_with_runtime", fail_resource)
 
     server = create_server(MCPSettings())
-    async with create_connected_server_and_client_session(
-        server,
-        raise_exceptions=False,
-    ) as client_session:
-        with pytest.raises(
-            McpError,
-            match=r"Error reading resource timebase://streams: resource failed",
-        ):
-            await client_session.read_resource(_resource_uri("timebase://streams"))
+    async with Client(server, raise_exceptions=False) as client_session:
+        with pytest.raises(MCPError) as error_info:
+            await client_session.read_resource("timebase://streams")
+
+    assert str(error_info.value) == "resource failed"
 
 
 @pytest.mark.anyio
@@ -309,18 +299,15 @@ async def test_read_unscoped_resource_requires_instance_key_when_multiple_instan
     )
     server = create_server(settings)
 
-    async with create_connected_server_and_client_session(
-        server,
-        raise_exceptions=False,
-    ) as client_session:
+    async with Client(server, raise_exceptions=False) as client_session:
         with pytest.raises(
-            McpError,
+            MCPError,
             match=(
-                r"Error reading resource timebase://streams: "
-                r"instance_key is required when multiple TimeBase instances are configured"
+                r"instance_key is required when multiple TimeBase instances "
+                r"are configured"
             ),
         ):
-            await client_session.read_resource(_resource_uri("timebase://streams"))
+            await client_session.read_resource("timebase://streams")
 
 
 @pytest.mark.anyio
@@ -328,14 +315,12 @@ async def test_read_instance_scoped_resource_uses_selected_instance_when_multipl
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_resource(
-        _ctx, operation, *, instance_key=None, report_progress=False
-    ):
+    async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
         class StubClient:
@@ -344,7 +329,7 @@ async def test_read_instance_scoped_resource_uses_selected_instance_when_multipl
 
         return operation(StubClient())
 
-    monkeypatch.setattr(resources_module, "run_with_context", run_resource)
+    monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
     settings = MCPSettings.model_validate(
         {
             "servers": [
@@ -355,9 +340,7 @@ async def test_read_instance_scoped_resource_uses_selected_instance_when_multipl
     )
 
     async with client_session_factory(settings) as client_session:
-        catalog = await client_session.read_resource(
-            _resource_uri("timebase://instances/dev/streams")
-        )
+        catalog = await client_session.read_resource("timebase://instances/dev/streams")
 
     catalog_text = [
         content.text
@@ -374,14 +357,12 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     selected_instances: list[str | None] = []
 
-    async def run_resource(
-        _ctx, operation, *, instance_key=None, report_progress=False
-    ):
+    async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
         class StubClient:
@@ -390,7 +371,7 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
 
         return operation(StubClient())
 
-    monkeypatch.setattr(resources_module, "run_with_context", run_resource)
+    monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
     settings = MCPSettings.model_validate(
         {
             "servers": [
@@ -402,7 +383,7 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
 
     async with client_session_factory(settings) as client_session:
         catalog = await client_session.read_resource(
-            _resource_uri("timebase://instances/dxtick%3A%2F%2Fdev%3A8011/streams")
+            "timebase://instances/dxtick%3A%2F%2Fdev%3A8011/streams"
         )
 
     catalog_text = [
@@ -416,10 +397,53 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
 
 
 @pytest.mark.anyio
+async def test_read_resource_template_params_are_decoded_once(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    # The SDK percent-decodes template params, so decoding them again would turn
+    # 'a%2Fb' into 'a/b' and address the wrong instance or stream.
+    selected_instances: list[str | None] = []
+
+    async def run_resource(_runtime, operation, *, instance_key=None):
+        selected_instances.append(instance_key)
+
+        class StubClient:
+            def list_stream_infos(self) -> list[_StubStream]:
+                return [_StubStream("bars", f"from {instance_key}")]
+
+            def get_stream(self, stream_key: str) -> str:
+                return stream_key
+
+            def get_stream_schema_text(self, stream: str) -> str:
+                return f"schema:{instance_key}:{stream}"
+
+        return operation(StubClient())
+
+    monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
+
+    async with client_session_factory(None) as client_session:
+        await client_session.read_resource("timebase://instances/a%252Fb/streams")
+        stream_schema = await client_session.read_resource(
+            "timebase://streams/a%252Fb/schema"
+        )
+        instance_stream_schema = await client_session.read_resource(
+            "timebase://instances/a%252Fb/streams/c%252Fd/schema"
+        )
+
+    assert selected_instances == ["a%2Fb", None, "a%2Fb"]
+    assert _resource_text(stream_schema) == ["schema:None:a%2Fb"]
+    assert _resource_text(instance_stream_schema) == ["schema:a%2Fb:c%2Fd"]
+
+
+@pytest.mark.anyio
 async def test_call_list_timebase_instances_tool(
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     settings = MCPSettings.model_validate(
@@ -438,8 +462,8 @@ async def test_call_list_timebase_instances_tool(
     async with client_session_factory(settings) as client_session:
         result = await client_session.call_tool("list_timebase_instances", {})
 
-    assert result.isError is False
-    assert result.structuredContent == {
+    assert result.is_error is False
+    assert result.structured_content == {
         "result": [
             {
                 "name": "prod",
@@ -458,7 +482,7 @@ async def test_call_stream_tool_uses_selected_instance(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     selected_instances: list[str | None] = []
@@ -485,9 +509,9 @@ async def test_call_stream_tool_uses_selected_instance(
             {"instance_key": "dev"},
         )
 
-    assert result.isError is False
+    assert result.is_error is False
     assert selected_instances == ["dev"]
-    assert result.structuredContent == {
+    assert result.structured_content == {
         "result": [{"key": "bars", "description": "from dev"}]
     }
 
@@ -497,7 +521,7 @@ async def test_call_stream_tool_uses_single_instance_when_key_is_omitted(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     selected_instances: list[str | None] = []
@@ -513,7 +537,7 @@ async def test_call_stream_tool_uses_single_instance_when_key_is_omitted(
     async with client_session_factory(None) as client_session:
         result = await client_session.call_tool("list_streams", {})
 
-    assert result.isError is False
+    assert result.is_error is False
     assert selected_instances == [None]
 
 
@@ -522,7 +546,7 @@ async def test_call_stream_space_tools_pass_arguments(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     selected_instances: list[str | None] = []
@@ -589,21 +613,21 @@ async def test_call_stream_space_tools_pass_arguments(
             },
         )
 
-    assert spaces_result.isError is False
-    assert spaces_result.structuredContent == {
+    assert spaces_result.is_error is False
+    assert spaces_result.structured_content == {
         "stream_key": "bars",
         "spaces": ["", "blue"],
         "returned_count": 2,
         "supports_spaces": True,
     }
-    assert range_result.isError is False
-    assert range_result.structuredContent == {
+    assert range_result.is_error is False
+    assert range_result.structured_content == {
         "stream_key": "bars",
         "space": "blue",
         "start": None,
         "end": None,
     }
-    assert messages_result.isError is False
+    assert messages_result.is_error is False
     assert selected_instances == ["dev", "dev", "dev"]
     assert calls == [
         ("spaces", "bars", None),
@@ -624,18 +648,15 @@ async def test_call_stream_tool_requires_instance_key_when_multiple_instances() 
     )
     server = create_server(settings)
 
-    async with create_connected_server_and_client_session(
-        server,
-        raise_exceptions=False,
-    ) as client_session:
+    async with Client(server, raise_exceptions=False) as client_session:
         result = await client_session.call_tool("list_streams", {})
 
     text_content = [
         content.text for content in result.content if isinstance(content, TextContent)
     ]
 
-    assert result.isError is True
-    assert result.structuredContent is None
+    assert result.is_error is True
+    assert result.structured_content is None
     assert text_content == [
         "Error executing tool list_streams: "
         "instance_key is required when multiple TimeBase instances are configured. "
@@ -648,20 +669,20 @@ async def test_call_get_timebase_status_tool(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     monkeypatch.delenv("DXAPI_SSL_TERMINATION", raising=False)
     monkeypatch.delenv("DXAPI_SSL_TRUST_ALL", raising=False)
 
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **kwargs):
-        request = httpx.Request(method, url)
+        request = httpx2.Request(method, url)
         if url == "http://tb.example.com:8021/tb/ping":
-            return httpx.Response(200, request=request)
+            return httpx2.Response(200, request=request)
         if url == "http://tb.example.com:8021/tb/oauthinfo":
-            return httpx.Response(200, request=request, content=b"")
+            return httpx2.Response(200, request=request, content=b"")
         if url == "http://tb.example.com:8021/tb/api/info":
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 request=request,
                 json={
@@ -669,7 +690,7 @@ async def test_call_get_timebase_status_tool(
                 },
             )
         if url == "http://tb.example.com:8021/tb/api/license":
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 request=request,
                 json={
@@ -685,7 +706,7 @@ async def test_call_get_timebase_status_tool(
                 },
             )
         if url == "http://tb.example.com:8021/tb/api/server/security":
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 request=request,
                 json={
@@ -694,7 +715,7 @@ async def test_call_get_timebase_status_tool(
                 },
             )
         if url == "http://tb.example.com:8021/tb/api/server/system?gc=false":
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 request=request,
                 json={
@@ -710,19 +731,19 @@ async def test_call_get_timebase_status_tool(
         raise AssertionError(f"unexpected URL: {url}")
 
     monkeypatch.setattr(
-        "timebase_mcp.clients.http.transport.httpx.request", fake_request
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
     )
     settings = MCPSettings(tb_http_url="http://tb.example.com:8021")
 
     async with client_session_factory(settings) as client_session:
         result = await client_session.call_tool("get_timebase_status", {})
 
-    assert result.isError is False
-    assert result.structuredContent is not None
-    assert result.structuredContent["version"] == "5.7.13"
-    assert result.structuredContent["security"]["enabled"] is True
-    assert result.structuredContent["license"]["valid_until"] == "2026-12-31"
-    assert result.structuredContent["runtime"]["java_version"] == "21"
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["version"] == "5.7.13"
+    assert result.structured_content["security"]["enabled"] is True
+    assert result.structured_content["license"]["valid_until"] == "2026-12-31"
+    assert result.structured_content["runtime"]["java_version"] == "21"
 
 
 @pytest.mark.anyio
@@ -730,7 +751,7 @@ async def test_call_get_server_configuration_tool(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     monkeypatch.delenv("DXAPI_SSL_TERMINATION", raising=False)
@@ -772,7 +793,7 @@ async def test_call_get_server_configuration_tool(
             "}"
         )
     ]
-    assert result.structuredContent == {
+    assert result.structured_content == {
         "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
@@ -792,7 +813,7 @@ async def test_call_get_server_configuration_tool(
             }
         ],
     }
-    assert result.isError is False
+    assert result.is_error is False
 
 
 @pytest.mark.anyio
@@ -800,7 +821,7 @@ async def test_call_get_server_configuration_reports_all_timebase_instances(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     monkeypatch.delenv("DXAPI_SSL_TERMINATION", raising=False)
@@ -823,8 +844,8 @@ async def test_call_get_server_configuration_reports_all_timebase_instances(
     async with client_session_factory(settings) as client_session:
         result = await client_session.call_tool("get_server_configuration", {})
 
-    assert result.isError is False
-    structured_content = result.structuredContent
+    assert result.is_error is False
+    structured_content = result.structured_content
     assert structured_content is not None
     assert structured_content["timebase_instances"] == [
         {
@@ -891,7 +912,7 @@ async def test_call_get_server_configuration_tool_reports_detected_edition(
     async with client_session_factory(settings) as client_session:
         result = await client_session.call_tool("get_server_configuration", {})
 
-    assert result.structuredContent == {
+    assert result.structured_content == {
         "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
@@ -930,7 +951,7 @@ async def test_call_get_server_configuration_tool_reports_enterprise_for_oauth2(
     async with client_session_factory(settings) as client_session:
         result = await client_session.call_tool("get_server_configuration", {})
 
-    assert result.structuredContent == {
+    assert result.structured_content == {
         "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
@@ -968,7 +989,7 @@ async def test_call_get_server_configuration_tool_sanitizes_url_credentials(
     async with client_session_factory(settings) as client_session:
         result = await client_session.call_tool("get_server_configuration", {})
 
-    assert result.structuredContent == {
+    assert result.structured_content == {
         "version": get_version(),
         "transport": "stdio",
         "inbound_auth_mode": "none",
@@ -995,7 +1016,7 @@ async def test_call_compile_query_tool_returns_compact_success_payload(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     async def run_compile_query(
@@ -1021,8 +1042,8 @@ async def test_call_compile_query_tool_returns_compact_success_payload(
             {"query": 'select * from "bars"'},
         )
 
-    assert result.isError is False
-    assert result.structuredContent == {
+    assert result.is_error is False
+    assert result.structured_content == {
         "valid": True,
         "error": None,
         "error_token": None,
@@ -1036,7 +1057,7 @@ async def test_call_list_qql_functions_tool_returns_structured_payload(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     selected_instances: list[str | None] = []
@@ -1084,11 +1105,11 @@ async def test_call_list_qql_functions_tool_returns_structured_payload(
             {"instance_key": "dev", "kind": "stateless", "function_id": "MAX"},
         )
 
-    assert result.isError is False
+    assert result.is_error is False
     assert selected_instances == ["dev"]
     assert selected_kinds == ["stateless"]
     assert selected_function_ids == ["MAX"]
-    assert result.structuredContent == {
+    assert result.structured_content == {
         "stateless": [
             {
                 "id": "MAX",
@@ -1135,10 +1156,7 @@ async def test_call_execute_query_tool_surfaces_operation_errors_to_client(
     monkeypatch.setattr(query_tools, "run_with_context", fail_operation)
 
     server = create_server(MCPSettings())
-    async with create_connected_server_and_client_session(
-        server,
-        raise_exceptions=False,
-    ) as client_session:
+    async with Client(server, raise_exceptions=False) as client_session:
         result = await client_session.call_tool(
             "execute_query",
             {"query": 'select * from "bars"'},
@@ -1148,8 +1166,8 @@ async def test_call_execute_query_tool_surfaces_operation_errors_to_client(
         content.text for content in result.content if isinstance(content, TextContent)
     ]
 
-    assert result.isError is True
-    assert result.structuredContent is None
+    assert result.is_error is True
+    assert result.structured_content is None
     assert text_content == [f"Error executing tool execute_query: {message}"]
 
 
@@ -1158,7 +1176,7 @@ async def test_call_compile_query_tool_returns_structured_error_payload(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
         [MCPSettings | None],
-        AbstractAsyncContextManager[ClientSession],
+        AbstractAsyncContextManager[Client],
     ],
 ) -> None:
     async def run_compile_query(
@@ -1189,8 +1207,8 @@ async def test_call_compile_query_tool_returns_structured_error_payload(
             {"query": 'select * from "bars"'},
         )
 
-    assert result.isError is False
-    assert result.structuredContent == {
+    assert result.is_error is False
+    assert result.structured_content == {
         "valid": False,
         "error": "QQL compile error [at 6.7..12].",
         "error_token": '"low"',
@@ -1202,3 +1220,115 @@ async def test_call_compile_query_tool_returns_structured_error_payload(
             "end_column": 12,
         },
     }
+
+
+class _QueryStubClient:
+    """Pooled-client stand-in whose query read is driven by the cancel flag."""
+
+    def __init__(self, *, block_until_cancelled: bool) -> None:
+        self.block_until_cancelled = block_until_cancelled
+        self.request_cancel_calls = 0
+        self.interrupt_calls = 0
+        self.close_calls = 0
+        self.rows_read = 0
+        self.read_started = threading.Event()
+        self.read_finished = threading.Event()
+        self._cancel = threading.Event()
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+    def interrupt(self) -> None:
+        self.interrupt_calls += 1
+        self.close()
+
+    def bind_operation(self) -> None:
+        self._cancel = threading.Event()
+        self.rows_read = 0
+
+    def request_cancel(self) -> None:
+        self.request_cancel_calls += 1
+        self._cancel.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel.is_set()
+
+    def raise_if_cancelled(self) -> None:
+        if self.cancel_requested:
+            raise TimeBaseOperationCancelledError("stopped before completing")
+
+    def read_query_messages(
+        self, query_text: str, limit: int
+    ) -> list[dict[str, object]]:
+        self.read_started.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if self.cancel_requested:
+                break
+            if not self.block_until_cancelled and self.rows_read >= 3:
+                break
+            time.sleep(0.02)
+            self.rows_read += 1
+        self.read_finished.set()
+        return [{"type": "Row", "n": index} for index in range(self.rows_read)]
+
+
+@pytest.mark.anyio
+async def test_execute_query_reports_progress_to_a_real_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(operations_module, "_PROGRESS_INTERVAL_SECONDS", 0.02)
+    stub = _QueryStubClient(block_until_cancelled=False)
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", lambda _instance: stub
+    )
+
+    updates: list[tuple[float, str | None]] = []
+
+    async def on_progress(
+        progress: float, total: float | None, message: str | None
+    ) -> None:
+        updates.append((progress, message))
+
+    server = create_server(MCPSettings())
+    async with Client(server, raise_exceptions=True) as client_session:
+        result = await client_session.call_tool(
+            "execute_query",
+            {"query": 'select * from "bars"'},
+            progress_callback=on_progress,
+        )
+
+    assert result.is_error is False
+    assert updates, "no progress reached the client"
+    values = [progress for progress, _ in updates]
+    assert values == sorted(values)
+    assert len(set(values)) == len(values)
+    assert all("elapsed" in (message or "") for _, message in updates)
+
+
+@pytest.mark.anyio
+async def test_client_cancel_stops_execute_query_cooperatively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _QueryStubClient(block_until_cancelled=True)
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", lambda _instance: stub
+    )
+
+    server = create_server(MCPSettings())
+    async with Client(server, raise_exceptions=False) as client_session:
+        call = asyncio.create_task(
+            client_session.call_tool("execute_query", {"query": 'select * from "bars"'})
+        )
+        await asyncio.to_thread(stub.read_started.wait, 5)
+
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+
+        await asyncio.to_thread(stub.read_finished.wait, 5)
+
+        assert stub.request_cancel_calls >= 1
+        assert stub.interrupt_calls == 0
+        assert stub.close_calls == 0

@@ -5,7 +5,6 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
-import anyio
 import pytest
 from typing_extensions import override
 
@@ -721,15 +720,16 @@ async def test_run_with_runtime_returns_completed_result_when_timeout_races_comp
         created_clients.append(client)
         return client
 
-    async def fake_wait_for(awaitable, timeout):
+    async def fake_wait(futures, timeout=None):
         assert timeout == 1
-        await awaitable
-        raise TimeoutError
+        for future in futures:
+            await future
+        return set(), set(futures)
 
     monkeypatch.setattr(
         "timebase_mcp.clients.factory.create_timebase_client", build_client
     )
-    monkeypatch.setattr(operations_module.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(operations_module.asyncio, "wait", fake_wait)
 
     runtime = build_runtime(MCPSettings(operation_timeout_seconds=1))
 
@@ -1056,63 +1056,6 @@ async def test_run_with_runtime_reports_monotonic_progress_heartbeat(
         message is not None and "Waiting for results" in message
         for _, message in progress_calls
     )
-
-    await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
-
-
-@pytest.mark.anyio
-async def test_run_with_runtime_stops_when_progress_stream_reports_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Covers the defensive branch in isolation. It does not reproduce a real
-    # streamable-http disconnect, where the SDK swallows the stream error instead.
-    monkeypatch.setattr(operations_module, "_PROGRESS_INTERVAL_SECONDS", 0.02)
-
-    created_clients: list[StubClient] = []
-    operation_stopped = threading.Event()
-
-    def build_client(instance) -> StubClient:
-        client = StubClient(key=instance.key)
-        created_clients.append(client)
-        return client
-
-    monkeypatch.setattr(
-        "timebase_mcp.clients.factory.create_timebase_client", build_client
-    )
-
-    runtime = build_runtime(MCPSettings())
-
-    def cooperative_operation(client: TimeBaseClient) -> str:
-        stub_client = cast(StubClient, client)
-        while not stub_client.cancel_requested:
-            time.sleep(0.01)
-        operation_stopped.set()
-        return "stopped"
-
-    class _DisconnectedContext:
-        async def report_progress(
-            self,
-            progress: float,
-            total: float | None = None,
-            message: str | None = None,
-        ) -> None:
-            raise anyio.ClosedResourceError
-
-    result = await _with_timeout(
-        run_with_runtime(
-            runtime,
-            cooperative_operation,
-            progress_ctx=cast(Any, _DisconnectedContext()),
-        ),
-        "Operation was not cancelled after client disconnect.",
-    )
-
-    assert result == "stopped"
-    assert operation_stopped.is_set()
-    assert created_clients[0].request_cancel_calls >= 1
-    # A cooperative stop must not hard-interrupt or close the connection.
-    assert created_clients[0].interrupt_calls == 0
-    assert created_clients[0].close_calls == 0
 
     await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
 

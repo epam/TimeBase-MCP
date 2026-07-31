@@ -1,6 +1,5 @@
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.session import ServerSession
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver import Context, MCPServer
+from mcp_types import ToolAnnotations
 from pydantic import Field
 
 from timebase_mcp.models.core import (
@@ -17,19 +16,19 @@ from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.tools.common import InstanceName
 
 
-def register_stream_tools(mcp: FastMCP) -> None:
+def register_stream_tools(mcp: MCPServer) -> None:
 
     @mcp.tool(
         name="list_streams",
         description="List available TimeBase streams with their descriptions",
         annotations=ToolAnnotations(
             title="List TimeBase streams",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def list_streams(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
     ) -> list[StreamInfo]:
         return await run_with_context(
@@ -43,12 +42,12 @@ def register_stream_tools(mcp: FastMCP) -> None:
         description="Get the schema of a specific stream",
         annotations=ToolAnnotations(
             title="Get TimeBase stream schema",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def get_stream_schema(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
         instance_key: InstanceName = None,
     ) -> StreamSchema:
@@ -63,12 +62,12 @@ def register_stream_tools(mcp: FastMCP) -> None:
         description="Get the time range of a specific stream in UTC",
         annotations=ToolAnnotations(
             title="Get TimeBase stream time range in UTC",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def get_stream_time_range(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
         instance_key: InstanceName = None,
     ) -> StreamTimeRange:
@@ -83,12 +82,12 @@ def register_stream_tools(mcp: FastMCP) -> None:
         description="List spaces for a specific TimeBase stream",
         annotations=ToolAnnotations(
             title="List TimeBase stream spaces",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def list_stream_spaces(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
         instance_key: InstanceName = None,
     ) -> StreamSpaces:
@@ -103,12 +102,12 @@ def register_stream_tools(mcp: FastMCP) -> None:
         description="Get the time range of a specific stream space in UTC",
         annotations=ToolAnnotations(
             title="Get TimeBase stream space time range in UTC",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def get_stream_space_time_range(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
         space: str = Field(
             description="Stream space to inspect; use an empty string for the default space",
@@ -128,12 +127,12 @@ def register_stream_tools(mcp: FastMCP) -> None:
         description="Get the symbols of a specific stream",
         annotations=ToolAnnotations(
             title="Get TimeBase stream symbols",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def get_stream_symbols(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         stream_key: str = Field(description="Stream key to inspect"),
         instance_key: InstanceName = None,
         limit: int = Field(
@@ -166,12 +165,12 @@ def register_stream_tools(mcp: FastMCP) -> None:
         description="Get the first or last N messages from a stream",
         annotations=ToolAnnotations(
             title="Get stream messages",
-            readOnlyHint=True,
-            openWorldHint=True,
+            read_only_hint=True,
+            open_world_hint=True,
         ),
     )
     async def get_stream_messages(
-        ctx: Context[ServerSession, TimeBaseRuntime],
+        ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
         stream_key: str = Field(description="Stream key to inspect"),
         reverse: bool = Field(

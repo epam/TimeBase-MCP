@@ -14,7 +14,7 @@ from typing_extensions import override
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import httpx
+import httpx2
 
 from timebase_mcp.auth.discovery import (
     InteractiveEndpoints,
@@ -169,7 +169,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
                     self._refresh()
                     if self._access_token is not None:
                         return self._access_token
-                except (httpx.HTTPError, ValueError, PermissionError) as exc:
+                except (httpx2.HTTPError, ValueError, PermissionError) as exc:
                     logger.info(
                         "Refreshing TimeBase token failed (%s); re-running login.",
                         exc,
@@ -310,7 +310,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
 
     def _post_token(self, token_endpoint: str, data: dict[str, Any]) -> TokenResponse:
         try:
-            response = httpx.post(
+            response = httpx2.post(
                 token_endpoint,
                 data=data,
                 headers={
@@ -320,13 +320,13 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
                 timeout=TOKEN_REQUEST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             if exc.response.status_code in (400, 401, 403):
                 raise PermissionError(
                     f"OAuth token request rejected: {exc.response.text}"
                 ) from exc
             raise ConnectionError(f"OAuth token request failed: {exc}") from exc
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             raise ConnectionError(f"OAuth token request failed: {exc}") from exc
 
         payload = parse_json_token_response(response.text)

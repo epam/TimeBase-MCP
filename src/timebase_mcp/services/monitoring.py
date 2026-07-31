@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any, Literal, TypeVar
 from urllib.parse import urlencode
 
-import httpx
+import httpx2
 
 from timebase_mcp.errors import TimeBaseOperationError, TimeBaseOperationTimeoutError
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
@@ -67,7 +67,7 @@ async def _run_monitor_operation(
         return await future
     except TimeBaseOperationError:
         raise
-    except httpx.HTTPError as exc:
+    except httpx2.HTTPError as exc:
         raise TimeBaseOperationError(str(exc)) from exc
     except ValueError as exc:
         raise TimeBaseOperationError(str(exc)) from exc
@@ -77,7 +77,7 @@ async def _run_monitor_operation(
         await runtime.operation_budget.release()
 
 
-def _raise_for_required_response(response: httpx.Response, *, endpoint: str) -> None:
+def _raise_for_required_response(response: httpx2.Response, *, endpoint: str) -> None:
     if response.status_code == 404:
         raise TimeBaseOperationError(
             f"TimeBase Monitor API endpoint {endpoint} is not available."
@@ -88,7 +88,7 @@ def _raise_for_required_response(response: httpx.Response, *, endpoint: str) -> 
         )
     try:
         response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
+    except httpx2.HTTPStatusError as exc:
         raise TimeBaseOperationError(
             f"TimeBase Monitor API endpoint {endpoint} failed with HTTP {response.status_code}."
         ) from exc
