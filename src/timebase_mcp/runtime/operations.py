@@ -316,10 +316,6 @@ async def _pump_progress(
 
         try:
             await ctx.report_progress(progress=float(tick), message=message)
-        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
-            logger.info("Progress stream closed, stopping the operation.")
-            client.request_cancel()
-            return
         except Exception:
             logger.debug(
                 "Progress reporting failed, stopping progress updates.",
