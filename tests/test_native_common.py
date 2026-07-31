@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
+from timebase_mcp.clients.native import community, enterprise
 from timebase_mcp.clients.native.common import (
     call_cursor_context,
     closing,
@@ -188,3 +190,55 @@ def test_connection_error_hint_includes_auto_auth_error() -> None:
     )
 
     assert "OAuth auto-discovery failed earlier" in hint
+
+
+class _StubTickDb:
+    def __init__(self) -> None:
+        self.open_calls: list[bool] = []
+
+    def open(self, read_only_mode: bool) -> bool:
+        self.open_calls.append(read_only_mode)
+        return True
+
+    def isOpen(self) -> bool:
+        return bool(self.open_calls)
+
+    def setApplicationName(self, name: str) -> None:
+        return None
+
+
+class _StubDxapiModule:
+    """Stands in for the dxapi module, handing out one stub connection."""
+
+    def __init__(self, db: _StubTickDb) -> None:
+        self.TickDb = SimpleNamespace(createFromUrl=lambda *args, **kwargs: db)
+
+
+@pytest.mark.parametrize("read_only", [True, False])
+@pytest.mark.parametrize(
+    ("module", "attribute", "client_name"),
+    [
+        (community, "dxapi_ce", "CommunityTimeBaseClient"),
+        (enterprise, "dxapi", "EnterpriseTimeBaseClient"),
+    ],
+)
+def test_native_clients_open_db_with_configured_read_only_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    module: object,
+    attribute: str,
+    client_name: str,
+    read_only: bool,
+) -> None:
+    db = _StubTickDb()
+    monkeypatch.setattr(module, attribute, _StubDxapiModule(db))
+    instance = TimeBaseInstanceRuntime(
+        key="prod",
+        config=TimeBaseInstanceConfig(
+            tb_url="dxtick://localhost:8011",
+            read_only=read_only,
+        ),
+    )
+
+    getattr(module, client_name)(instance).open()
+
+    assert db.open_calls == [read_only]

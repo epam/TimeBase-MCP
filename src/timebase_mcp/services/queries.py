@@ -4,6 +4,7 @@ import re
 from typing import Any, Literal
 
 from timebase_mcp.clients.base import TimeBaseClient
+from timebase_mcp.errors import ReadOnlyInstanceError
 from timebase_mcp.models.core import (
     CompileQQLResult,
     QQLErrorPosition,
@@ -13,6 +14,11 @@ from timebase_mcp.services.previews import format_messages_preview
 from timebase_mcp.services.qql_functions import normalize_qql_functions
 
 _ERROR_CONTEXT_CHARS = 40
+_READ_ONLY_KEYWORD = "SELECT"
+_KEYWORD_TOKEN_TYPE = "KEYWORD"
+# QueryToken.location packs start line/column and end line/column into one int,
+# 16 bits per field, lines and columns zero-based and the end exclusive.
+_LOCATION_FIELD_MASK = 0xFFFF
 _QQL_FUNCTIONS_LIMIT = 10_000
 _QQL_FUNCTION_SOURCE = {
     "stateless": "stateless_functions()",
@@ -27,6 +33,9 @@ def execute_query(client: TimeBaseClient, query: str, limit: int = 50) -> str:
     if limit < 1:
         raise ValueError("limit must be at least 1.")
 
+    if client.read_only:
+        _reject_when_query_modifies(client, query_text)
+
     messages = client.read_query_messages(query_text, limit)
     client.raise_if_cancelled()
     return _format_query_messages_preview(
@@ -34,6 +43,47 @@ def execute_query(client: TimeBaseClient, query: str, limit: int = 50) -> str:
         limit=limit,
         messages=messages,
     )
+
+
+def _reject_when_query_modifies(client: TimeBaseClient, query_text: str) -> None:
+    keyword = _leading_keyword(client, query_text)
+    if keyword == _READ_ONLY_KEYWORD:
+        return
+
+    statement = f"'{keyword}' statements are" if keyword else "This query is"
+    raise ReadOnlyInstanceError(
+        f"TimeBase instance '{client.instance_key}' is read-only. "
+        f"{statement} rejected, only {_READ_ONLY_KEYWORD} queries are allowed."
+    )
+
+
+def _leading_keyword(client: TimeBaseClient, query_text: str) -> str | None:
+    """First keyword of the compiled statement, or None when it cannot be read."""
+    for token in client.compile_query_tokens(query_text):
+        if getattr(token, "type", None) != _KEYWORD_TOKEN_TYPE:
+            continue
+        text = _token_text(query_text, token)
+        return text.upper() if text is not None else None
+
+    return None
+
+
+def _token_text(query_text: str, token: Any) -> str | None:
+    location = getattr(token, "location", None)
+    if not isinstance(location, int):
+        return None
+
+    start_line = (location >> 48) & _LOCATION_FIELD_MASK
+    start_column = (location >> 32) & _LOCATION_FIELD_MASK
+    end_line = (location >> 16) & _LOCATION_FIELD_MASK
+    end_column = location & _LOCATION_FIELD_MASK
+
+    lines = query_text.splitlines()
+    if start_line != end_line or start_line >= len(lines):
+        return None
+
+    text = lines[start_line][start_column:end_column]
+    return text or None
 
 
 def compile_query(client: TimeBaseClient, query: str) -> CompileQQLResult:

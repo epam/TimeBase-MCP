@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -8,25 +9,35 @@ from typing_extensions import override
 
 from timebase_mcp.clients.base import TimeBaseClient
 from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
-from timebase_mcp.errors import TimeBaseOperationCancelledError
+from timebase_mcp.errors import ReadOnlyInstanceError, TimeBaseOperationCancelledError
 from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.runtime.instance import (
     TimeBaseInstanceConfig,
     TimeBaseInstanceRuntime,
 )
 from timebase_mcp.services.qql_functions import normalize_qql_functions
-from timebase_mcp.services.queries import list_qql_functions
+from timebase_mcp.services.queries import execute_query, list_qql_functions
 
 
-class StubQQLFunctionsClient(TimeBaseClient):
-    def __init__(self, messages_by_query: dict[str, list[dict[str, Any]]]) -> None:
+class StubQueryClient(TimeBaseClient):
+    def __init__(
+        self,
+        messages_by_query: dict[str, list[dict[str, Any]]] | None = None,
+        *,
+        read_only: bool = False,
+        tokens: list[Any] | None = None,
+    ) -> None:
         super().__init__(
             TimeBaseInstanceRuntime(
                 key=DEFAULT_INSTANCE_KEY,
-                config=TimeBaseInstanceConfig(tb_url="dxtick://localhost:8011"),
+                config=TimeBaseInstanceConfig(
+                    tb_url="dxtick://localhost:8011",
+                    read_only=read_only,
+                ),
             )
         )
-        self.messages_by_query = messages_by_query
+        self.messages_by_query = messages_by_query or {}
+        self.tokens = tokens or []
         self.executed_queries: list[str] = []
 
     @override
@@ -91,11 +102,11 @@ class StubQQLFunctionsClient(TimeBaseClient):
     @override
     def read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:
         self.executed_queries.append(query_text)
-        return self.messages_by_query[query_text]
+        return self.messages_by_query.get(query_text, [])
 
     @override
     def compile_query_tokens(self, query_text: str) -> list[Any]:
-        raise NotImplementedError
+        return self.tokens
 
 
 def test_normalize_qql_functions_groups_and_deduplicates_signatures() -> None:
@@ -291,7 +302,7 @@ def test_normalize_qql_functions_preserves_unknown_encoding() -> None:
 
 
 def test_list_qql_functions_can_filter_by_kind() -> None:
-    client = StubQQLFunctionsClient(
+    client = StubQueryClient(
         {
             "SELECT stateless_functions() AS FUNCS": [
                 {
@@ -318,7 +329,7 @@ def test_list_qql_functions_can_filter_by_kind() -> None:
 
 def test_list_qql_functions_filters_by_function_id_server_side() -> None:
     query = "SELECT f AS FUNCS ARRAY JOIN stateful_functions() AS f WHERE f.id == 'SUM'"
-    client = StubQQLFunctionsClient(
+    client = StubQueryClient(
         {
             query: [
                 {
@@ -344,7 +355,7 @@ def test_list_qql_functions_escapes_function_id_filter() -> None:
     query = (
         "SELECT f AS FUNCS ARRAY JOIN stateless_functions() AS f WHERE f.id == 'O''HLC'"
     )
-    client = StubQQLFunctionsClient({query: []})
+    client = StubQueryClient({query: []})
 
     result = list_qql_functions(client, "stateless", function_id="O'HLC")
 
@@ -358,7 +369,7 @@ def test_list_qql_functions_raises_and_stops_when_cancelled() -> None:
     stateless_query = "SELECT stateless_functions() AS FUNCS"
     stateful_query = "SELECT stateful_functions() AS FUNCS"
 
-    class CancellingClient(StubQQLFunctionsClient):
+    class CancellingClient(StubQueryClient):
         @override
         def read_query_messages(
             self, query_text: str, limit: int
@@ -375,3 +386,96 @@ def test_list_qql_functions_raises_and_stops_when_cancelled() -> None:
 
     # The second query must never be issued after a stop.
     assert client.executed_queries == [stateless_query]
+
+
+def _keyword_token(query: str, keyword: str) -> object:
+    """A KEYWORD token located where ``keyword`` appears, as the compiler reports it.
+
+    ``location`` packs start line/column and end line/column, 16 bits per field.
+    """
+    line_number, line = next(
+        (index, text)
+        for index, text in enumerate(query.splitlines())
+        if keyword in text
+    )
+    column = line.index(keyword)
+    location = (
+        (line_number << 48)
+        | (column << 32)
+        | (line_number << 16)
+        | (column + len(keyword))
+    )
+    return SimpleNamespace(type="KEYWORD", location=location)
+
+
+@pytest.mark.parametrize("keyword", ["SELECT", "select"])
+def test_read_only_instance_allows_select_queries(keyword: str) -> None:
+    query = f"{keyword} value FROM bars"
+    client = StubQueryClient(read_only=True, tokens=[_keyword_token(query, keyword)])
+
+    execute_query(client, query)
+
+    assert client.executed_queries == [query]
+
+
+def test_read_only_instance_allows_parenthesised_select() -> None:
+    # Tokens before the leading keyword are skipped, so "(SELECT ...)" is a query.
+    query = '(SELECT value FROM "bars")'
+    client = StubQueryClient(
+        read_only=True,
+        tokens=[
+            SimpleNamespace(type="PUNCTUATION", location=1),
+            _keyword_token(query, "SELECT"),
+        ],
+    )
+
+    execute_query(client, query)
+
+    assert client.executed_queries == [query]
+
+
+def test_read_only_instance_rejects_ddl() -> None:
+    query = 'DROP STREAM "bars"'
+    client = StubQueryClient(read_only=True, tokens=[_keyword_token(query, "DROP")])
+
+    with pytest.raises(ReadOnlyInstanceError) as error_info:
+        execute_query(client, query)
+
+    assert "'DROP' statements are rejected" in str(error_info.value)
+    assert client.executed_queries == []
+
+
+def test_read_only_instance_rejects_ddl_hidden_behind_comments() -> None:
+    # The TimeBase lexer skips comments, so the first token is the real statement.
+    query = '/* SELECT */ -- SELECT\nCREATE DURABLE STREAM "bars"'
+    client = StubQueryClient(read_only=True, tokens=[_keyword_token(query, "CREATE")])
+
+    with pytest.raises(ReadOnlyInstanceError, match="'CREATE' statements are rejected"):
+        execute_query(client, query)
+
+    assert client.executed_queries == []
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        pytest.param([], id="no-keyword"),
+        pytest.param([SimpleNamespace(type="KEYWORD", location=None)], id="unreadable"),
+    ],
+)
+def test_read_only_instance_rejects_unrecognized_statements(tokens: list[Any]) -> None:
+    client = StubQueryClient(read_only=True, tokens=tokens)
+
+    with pytest.raises(ReadOnlyInstanceError, match="This query is rejected"):
+        execute_query(client, "SELECT value FROM bars")
+
+    assert client.executed_queries == []
+
+
+def test_writable_instance_runs_queries_without_classifying() -> None:
+    query = 'DROP STREAM "bars"'
+    client = StubQueryClient(tokens=[_keyword_token(query, "DROP")])
+
+    execute_query(client, query)
+
+    assert client.executed_queries == [query]
