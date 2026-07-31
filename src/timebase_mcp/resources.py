@@ -1,5 +1,8 @@
 from mcp.server.mcpserver import MCPServer
+from mcp.shared.exceptions import MCPError
+from mcp_types import INTERNAL_ERROR
 
+from timebase_mcp.errors import TimeBaseMCPError
 from timebase_mcp.runtime.operations import run_with_runtime
 from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.services import streams as stream_service
@@ -12,7 +15,11 @@ def register_resources(mcp: MCPServer, runtime: TimeBaseRuntime) -> None:
     """Register stable TimeBase metadata resources."""
 
     async def _run_resource_operation(operation, *, instance_key: str | None = None):
-        return await run_with_runtime(runtime, operation, instance_key=instance_key)
+        try:
+            return await run_with_runtime(runtime, operation, instance_key=instance_key)
+        except TimeBaseMCPError as exc:
+            # MCPError is passed to client by the SDK
+            raise MCPError(INTERNAL_ERROR, str(exc)) from exc
 
     @mcp.resource(
         "timebase://streams",

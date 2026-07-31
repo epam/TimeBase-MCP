@@ -277,9 +277,7 @@ async def test_read_resource_surfaces_operation_errors(
         with pytest.raises(MCPError) as error_info:
             await client_session.read_resource("timebase://streams")
 
-    # The SDK reports the failing URI but withholds the underlying cause.
-    assert str(error_info.value) == "Error reading resource timebase://streams"
-    assert "resource failed" not in str(error_info.value)
+    assert str(error_info.value) == "resource failed"
 
 
 @pytest.mark.anyio
@@ -299,7 +297,10 @@ async def test_read_unscoped_resource_requires_instance_key_when_multiple_instan
     async with Client(server, raise_exceptions=False) as client_session:
         with pytest.raises(
             MCPError,
-            match=r"Error reading resource timebase://streams",
+            match=(
+                r"instance_key is required when multiple TimeBase instances "
+                r"are configured"
+            ),
         ):
             await client_session.read_resource("timebase://streams")
 
