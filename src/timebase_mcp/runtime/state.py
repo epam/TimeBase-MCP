@@ -34,7 +34,10 @@ class TimeBaseRuntime:
             instance_key = server.instance_key
             instances[instance_key] = TimeBaseInstanceRuntime(
                 key=instance_key,
-                config=TimeBaseInstanceConfig.from_server_config(server),
+                config=TimeBaseInstanceConfig.from_server_config(
+                    server,
+                    default_read_only=settings.tb_read_only,
+                ),
                 interactive_redirect_uri=interactive_redirect_uri,
                 runtime_auth_enabled=settings.inbound_auth_enabled,
                 runtime_is_http_transport=settings.is_http_transport,

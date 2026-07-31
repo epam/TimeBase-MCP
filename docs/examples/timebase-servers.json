@@ -2,7 +2,8 @@
   {
     "name": "enterprise",
     "description": "Enterprise TimeBase",
-    "url": "dxtick://localhost:8011"
+    "url": "dxtick://localhost:8011",
+    "read_only": true
   },
   {
     "name": "community",

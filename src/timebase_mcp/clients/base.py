@@ -81,6 +81,16 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
             )
 
     @property
+    def instance_key(self) -> str:
+        """Key of the TimeBase instance this client is connected to."""
+        return self._instance.key
+
+    @property
+    def read_only(self) -> bool:
+        """Whether this instance is configured to be read-only."""
+        return self._instance.config.read_only
+
+    @property
     def rows_read(self) -> int:
         """Rows read so far by the current operation, for progress reporting."""
         return self._rows_read

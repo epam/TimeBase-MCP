@@ -6,6 +6,9 @@ when choosing between configured instances; pass the chosen name as the
 instance_key argument for each TB operation. In multi-instance setups,
 instance_key is required. In single-instance setups, omit it.
 
+Instances reported as read_only accept SELECT queries only, every other
+statement is rejected before it reaches TimeBase.
+
 Some tools have limited TimeBase server versions support.
 Don't assume everything is available on the specific instance.
 

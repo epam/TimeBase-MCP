@@ -468,10 +468,12 @@ async def test_call_list_timebase_instances_tool(
             {
                 "name": "prod",
                 "description": "Production TimeBase",
+                "read_only": False,
             },
             {
                 "name": "dxtick://dev:8011",
                 "description": None,
+                "read_only": False,
             },
         ]
     }
@@ -786,6 +788,7 @@ async def test_call_get_server_configuration_tool(
             '      "edition": null,\n'
             '      "outbound_auth_mode": "auto",\n'
             '      "http_url": null,\n'
+            '      "read_only": false,\n'
             '      "dxapi_ssl_termination": false,\n'
             '      "dxapi_ssl_trust_all": false\n'
             "    }\n"
@@ -808,6 +811,7 @@ async def test_call_get_server_configuration_tool(
                 "edition": None,
                 "outbound_auth_mode": "auto",
                 "http_url": None,
+                "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,
             }
@@ -856,6 +860,7 @@ async def test_call_get_server_configuration_reports_all_timebase_instances(
             "edition": None,
             "outbound_auth_mode": "auto",
             "http_url": "https://prod.example/tb",
+            "read_only": False,
             "dxapi_ssl_termination": False,
             "dxapi_ssl_trust_all": False,
         },
@@ -867,6 +872,7 @@ async def test_call_get_server_configuration_reports_all_timebase_instances(
             "edition": None,
             "outbound_auth_mode": "auto",
             "http_url": None,
+            "read_only": False,
             "dxapi_ssl_termination": False,
             "dxapi_ssl_trust_all": False,
         },
@@ -927,6 +933,7 @@ async def test_call_get_server_configuration_tool_reports_detected_edition(
                 "edition": "community",
                 "outbound_auth_mode": "auto",
                 "http_url": None,
+                "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,
             }
@@ -966,6 +973,7 @@ async def test_call_get_server_configuration_tool_reports_enterprise_for_oauth2(
                 "edition": "enterprise",
                 "outbound_auth_mode": "oauth2_client_credentials",
                 "http_url": None,
+                "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,
             }
@@ -1004,6 +1012,7 @@ async def test_call_get_server_configuration_tool_sanitizes_url_credentials(
                 "edition": None,
                 "outbound_auth_mode": "basic",
                 "http_url": None,
+                "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,
             }
@@ -1227,6 +1236,7 @@ class _QueryStubClient:
 
     def __init__(self, *, block_until_cancelled: bool) -> None:
         self.block_until_cancelled = block_until_cancelled
+        self.read_only = False
         self.request_cancel_calls = 0
         self.interrupt_calls = 0
         self.close_calls = 0
@@ -1332,3 +1342,50 @@ async def test_client_cancel_stops_execute_query_cooperatively(
         assert stub.request_cancel_calls >= 1
         assert stub.interrupt_calls == 0
         assert stub.close_calls == 0
+
+
+@pytest.mark.anyio
+async def test_call_list_timebase_instances_reports_read_only(
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    settings = MCPSettings.model_validate(
+        {
+            "tb_read_only": True,
+            "servers": [
+                {"name": "prod", "url": "dxtick://prod:8011"},
+                {"name": "dev", "url": "dxtick://dev:8011", "read_only": False},
+            ],
+        }
+    )
+
+    async with client_session_factory(settings) as client_session:
+        result = await client_session.call_tool("list_timebase_instances", {})
+
+    assert result.is_error is False
+    assert result.structured_content == {
+        "result": [
+            {"name": "prod", "description": None, "read_only": True},
+            {"name": "dev", "description": None, "read_only": False},
+        ]
+    }
+
+
+def test_build_server_configuration_reports_read_only_instances() -> None:
+    settings = MCPSettings.model_validate(
+        {
+            "servers": [
+                {"name": "prod", "url": "dxtick://prod:8011", "read_only": True},
+                {"name": "dev", "url": "dxtick://dev:8011"},
+            ]
+        }
+    )
+
+    configuration = build_server_configuration(build_runtime(settings))
+
+    assert [instance.read_only for instance in configuration.timebase_instances] == [
+        True,
+        False,
+    ]

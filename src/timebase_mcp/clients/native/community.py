@@ -74,7 +74,7 @@ class CommunityTimeBaseClient(TimeBaseClient):
                 )
             else:
                 db = dxapi_ce.TickDb.createFromUrl(self._instance.config.tb_url)
-            db.open(False)
+            db.open(self._instance.config.read_only)
         except Exception as exc:
             hint = connection_error_hint(self._instance, exc, edition="community")
             raise TimeBaseConnectionError(
@@ -82,8 +82,9 @@ class CommunityTimeBaseClient(TimeBaseClient):
             ) from exc
 
         logger.info(
-            "Connected to TimeBase via community client at %s",
+            "Connected to TimeBase via community client at %s (%s)",
             self._instance.config.tb_url,
+            "read-only" if self._instance.config.read_only else "read-write",
         )
         self._db = db
         return db

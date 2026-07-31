@@ -11,6 +11,7 @@ class TimeBaseServerConfiguration(BaseModel):
     edition: str | None = None
     outbound_auth_mode: str = "none"
     http_url: str | None = None
+    read_only: bool = False
     dxapi_ssl_termination: bool = False
     dxapi_ssl_trust_all: bool = False
 
@@ -27,6 +28,10 @@ class MCPServerConfiguration(BaseModel):
 class TimeBaseInstanceInfo(BaseModel):
     name: str = Field(description="Name to pass as the instance_key argument to tools.")
     description: str | None = None
+    read_only: bool = Field(
+        default=False,
+        description="Whether TimeBase rejects write operations on this instance.",
+    )
 
 
 class StreamInfo(BaseModel):

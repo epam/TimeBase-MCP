@@ -5,6 +5,7 @@ from pydantic import SecretStr, ValidationError
 
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
+from timebase_mcp.runtime.state import build_runtime
 from timebase_mcp.constants import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -437,3 +438,126 @@ def test_servers_print_emits_quoted_json_string(
     assert exit_code == 0
     assert captured.out == json.dumps(compact) + "\n"
     assert captured.err == ""
+
+
+def test_settings_default_to_read_write_connections() -> None:
+    settings = MCPSettings()
+
+    assert settings.tb_read_only is False
+    assert settings.resolve_servers()[0].read_only is False
+
+
+def test_read_only_env_applies_to_flat_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_READ_ONLY, "true")
+
+    settings = MCPSettings()
+
+    assert settings.tb_read_only is True
+    assert settings.resolve_servers()[0].read_only is True
+
+
+def test_read_only_parsed_from_servers_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        SettingsEnv.TIMEBASE_SERVERS,
+        json.dumps(
+            [
+                {"name": "prod", "url": "dxtick://prod:8011", "read_only": True},
+                {"name": "dev", "url": "dxtick://dev:8011"},
+            ]
+        ),
+    )
+
+    servers = MCPSettings().resolve_servers()
+
+    assert [server.read_only for server in servers] == [True, None]
+
+
+def test_read_only_parsed_from_servers_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    servers_file = tmp_path / "servers.json"
+    servers_file.write_text(
+        json.dumps([{"name": "prod", "url": "dxtick://prod:8011", "read_only": True}]),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_SERVERS, str(servers_file))
+
+    servers = MCPSettings().resolve_servers()
+
+    assert [server.read_only for server in servers] == [True]
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [("true", True), ("false", False), (None, None)],
+)
+def test_read_only_parsed_from_indexed_env(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_value: str | None,
+    expected: bool | None,
+) -> None:
+    monkeypatch.setenv(f"{SettingsEnv.TIMEBASE_SERVERS}_0_URL", "dxtick://prod:8011")
+    monkeypatch.setenv(f"{SettingsEnv.TIMEBASE_SERVERS}_0_NAME", "prod")
+    monkeypatch.delenv(f"{SettingsEnv.TIMEBASE_SERVERS}_0_READ_ONLY", raising=False)
+    if raw_value is not None:
+        monkeypatch.setenv(
+            f"{SettingsEnv.TIMEBASE_SERVERS}_0_READ_ONLY",
+            raw_value,
+        )
+
+    servers = MCPSettings().resolve_servers()
+
+    assert [server.read_only for server in servers] == [expected]
+
+
+def test_read_only_env_combines_with_servers_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_READ_ONLY, "true")
+    monkeypatch.setenv(
+        SettingsEnv.TIMEBASE_SERVERS,
+        json.dumps([{"name": "prod", "url": "dxtick://prod:8011"}]),
+    )
+
+    settings = MCPSettings()
+
+    assert settings.tb_read_only is True
+    assert settings.resolve_servers()[0].read_only is None
+
+
+def test_runtime_applies_read_only_default_to_instances() -> None:
+    settings = MCPSettings.model_validate(
+        {
+            "tb_read_only": True,
+            "servers": [
+                {"name": "prod", "url": "dxtick://prod:8011"},
+                {"name": "dev", "url": "dxtick://dev:8011", "read_only": False},
+            ],
+        }
+    )
+
+    runtime = build_runtime(settings)
+
+    assert runtime.instances["prod"].config.read_only is True
+    assert runtime.instances["dev"].config.read_only is False
+
+
+def test_runtime_applies_per_instance_read_only_without_default() -> None:
+    settings = MCPSettings.model_validate(
+        {
+            "servers": [
+                {"name": "prod", "url": "dxtick://prod:8011", "read_only": True},
+                {"name": "dev", "url": "dxtick://dev:8011"},
+            ],
+        }
+    )
+
+    runtime = build_runtime(settings)
+
+    assert runtime.instances["prod"].config.read_only is True
+    assert runtime.instances["dev"].config.read_only is False
