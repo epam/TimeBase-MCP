@@ -35,6 +35,14 @@ class _StubStream:
     description: str | None = None
 
 
+def _resource_text(result) -> list[str]:
+    return [
+        content.text
+        for content in result.contents
+        if isinstance(content, TextResourceContents)
+    ]
+
+
 def test_remote_unauthenticated_bind_logs_warning(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -380,6 +388,49 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
 
     assert selected_instances == ["dxtick://dev:8011"]
     assert catalog_text == ["bars: from dxtick://dev:8011"]
+
+
+@pytest.mark.anyio
+async def test_read_resource_template_params_are_decoded_once(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    # The SDK percent-decodes template params, so decoding them again would turn
+    # 'a%2Fb' into 'a/b' and address the wrong instance or stream.
+    selected_instances: list[str | None] = []
+
+    async def run_resource(_runtime, operation, *, instance_key=None):
+        selected_instances.append(instance_key)
+
+        class StubClient:
+            def list_stream_infos(self) -> list[_StubStream]:
+                return [_StubStream("bars", f"from {instance_key}")]
+
+            def get_stream(self, stream_key: str) -> str:
+                return stream_key
+
+            def get_stream_schema_text(self, stream: str) -> str:
+                return f"schema:{instance_key}:{stream}"
+
+        return operation(StubClient())
+
+    monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
+
+    async with client_session_factory(None) as client_session:
+        await client_session.read_resource("timebase://instances/a%252Fb/streams")
+        stream_schema = await client_session.read_resource(
+            "timebase://streams/a%252Fb/schema"
+        )
+        instance_stream_schema = await client_session.read_resource(
+            "timebase://instances/a%252Fb/streams/c%252Fd/schema"
+        )
+
+    assert selected_instances == ["a%2Fb", None, "a%2Fb"]
+    assert _resource_text(stream_schema) == ["schema:None:a%2Fb"]
+    assert _resource_text(instance_stream_schema) == ["schema:a%2Fb:c%2Fd"]
 
 
 @pytest.mark.anyio
