@@ -13,6 +13,7 @@ from timebase_mcp.constants import SHARED_PRINCIPAL_KEY
 from timebase_mcp.errors import (
     TimeBaseConnectionError,
     TimeBaseMCPError,
+    TimeBaseOperationCancelledError,
     TimeBaseOperationError,
     TimeBaseOperationStateError,
     TimeBaseOperationTimeoutError,
@@ -89,15 +90,8 @@ async def run_with_runtime(
             )
 
         if timeout_seconds > 0:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.shield(operation_future),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError as exc:
-                if operation_future.done():
-                    return await operation_future
-
+            done, _ = await asyncio.wait({operation_future}, timeout=timeout_seconds)
+            if not done and not operation_future.done():
                 release_lease_in_background = _begin_stop(
                     lease,
                     operation_future,
@@ -106,9 +100,11 @@ async def run_with_runtime(
                 )
                 raise TimeBaseOperationTimeoutError(
                     f"TimeBase operation timed out after {timeout_seconds} seconds."
-                ) from exc
+                )
+        else:
+            await asyncio.wait({operation_future})
 
-        return await asyncio.shield(operation_future)
+        return operation_future.result()
     except asyncio.CancelledError:
         # We are inside an already-cancelled scope, so we must not await here:
         # anyio re-cancels awaits made in a cancelled scope, which would skip
@@ -223,34 +219,37 @@ async def _finalize_stopped_operation(
     """
     started = time.monotonic()
     try:
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(operation_future),
-                timeout=_COOPERATIVE_STOP_GRACE_SECONDS,
-            )
-        except TimeoutError:
+        done, _ = await asyncio.wait(
+            {operation_future},
+            timeout=_COOPERATIVE_STOP_GRACE_SECONDS,
+        )
+        if not done:
             await _escalate_to_interrupt(
                 operation_future,
                 lease,
                 instance_key=instance_key,
                 reason=reason,
             )
-        except Exception:
+            return
+
+        error = operation_future.exception()
+        if error is not None and not isinstance(error, TimeBaseOperationCancelledError):
             lease.mark_broken()
             logger.debug(
                 "TimeBase operation for instance %s raised while stopping (%s).",
                 instance_key,
                 reason,
-                exc_info=True,
+                exc_info=error,
             )
-        else:
-            logger.info(
-                "TimeBase operation for instance %s stopped cooperatively in %.2fs "
-                "(%s), connection reused.",
-                instance_key,
-                time.monotonic() - started,
-                reason,
-            )
+            return
+
+        logger.info(
+            "TimeBase operation for instance %s stopped cooperatively in %.2fs "
+            "(%s), connection reused.",
+            instance_key,
+            time.monotonic() - started,
+            reason,
+        )
     finally:
         await lease.aclose()
 

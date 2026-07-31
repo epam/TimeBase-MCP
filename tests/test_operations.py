@@ -720,15 +720,16 @@ async def test_run_with_runtime_returns_completed_result_when_timeout_races_comp
         created_clients.append(client)
         return client
 
-    async def fake_wait_for(awaitable, timeout):
+    async def fake_wait(futures, timeout=None):
         assert timeout == 1
-        await awaitable
-        raise TimeoutError
+        for future in futures:
+            await future
+        return set(), set(futures)
 
     monkeypatch.setattr(
         "timebase_mcp.clients.factory.create_timebase_client", build_client
     )
-    monkeypatch.setattr(operations_module.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(operations_module.asyncio, "wait", fake_wait)
 
     runtime = build_runtime(MCPSettings(operation_timeout_seconds=1))
 

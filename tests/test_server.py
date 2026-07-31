@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import threading
+import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -11,11 +14,13 @@ from mcp.shared.exceptions import MCPError
 from mcp_types import TextContent, TextResourceContents
 from pydantic import SecretStr
 
+import timebase_mcp.runtime.operations as operations_module
 from timebase_mcp import resources as resources_module
 from timebase_mcp.clients import factory as client_factory
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import (
+    TimeBaseOperationCancelledError,
     TimeBaseOperationError,
     TimeBaseOperationLimitError,
     TimeBaseOperationTimeoutError,
@@ -1215,3 +1220,115 @@ async def test_call_compile_query_tool_returns_structured_error_payload(
             "end_column": 12,
         },
     }
+
+
+class _QueryStubClient:
+    """Pooled-client stand-in whose query read is driven by the cancel flag."""
+
+    def __init__(self, *, block_until_cancelled: bool) -> None:
+        self.block_until_cancelled = block_until_cancelled
+        self.request_cancel_calls = 0
+        self.interrupt_calls = 0
+        self.close_calls = 0
+        self.rows_read = 0
+        self.read_started = threading.Event()
+        self.read_finished = threading.Event()
+        self._cancel = threading.Event()
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+    def interrupt(self) -> None:
+        self.interrupt_calls += 1
+        self.close()
+
+    def bind_operation(self) -> None:
+        self._cancel = threading.Event()
+        self.rows_read = 0
+
+    def request_cancel(self) -> None:
+        self.request_cancel_calls += 1
+        self._cancel.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel.is_set()
+
+    def raise_if_cancelled(self) -> None:
+        if self.cancel_requested:
+            raise TimeBaseOperationCancelledError("stopped before completing")
+
+    def read_query_messages(
+        self, query_text: str, limit: int
+    ) -> list[dict[str, object]]:
+        self.read_started.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if self.cancel_requested:
+                break
+            if not self.block_until_cancelled and self.rows_read >= 3:
+                break
+            time.sleep(0.02)
+            self.rows_read += 1
+        self.read_finished.set()
+        return [{"type": "Row", "n": index} for index in range(self.rows_read)]
+
+
+@pytest.mark.anyio
+async def test_execute_query_reports_progress_to_a_real_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(operations_module, "_PROGRESS_INTERVAL_SECONDS", 0.02)
+    stub = _QueryStubClient(block_until_cancelled=False)
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", lambda _instance: stub
+    )
+
+    updates: list[tuple[float, str | None]] = []
+
+    async def on_progress(
+        progress: float, total: float | None, message: str | None
+    ) -> None:
+        updates.append((progress, message))
+
+    server = create_server(MCPSettings())
+    async with Client(server, raise_exceptions=True) as client_session:
+        result = await client_session.call_tool(
+            "execute_query",
+            {"query": 'select * from "bars"'},
+            progress_callback=on_progress,
+        )
+
+    assert result.is_error is False
+    assert updates, "no progress reached the client"
+    values = [progress for progress, _ in updates]
+    assert values == sorted(values)
+    assert len(set(values)) == len(values)
+    assert all("elapsed" in (message or "") for _, message in updates)
+
+
+@pytest.mark.anyio
+async def test_client_cancel_stops_execute_query_cooperatively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = _QueryStubClient(block_until_cancelled=True)
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", lambda _instance: stub
+    )
+
+    server = create_server(MCPSettings())
+    async with Client(server, raise_exceptions=False) as client_session:
+        call = asyncio.create_task(
+            client_session.call_tool("execute_query", {"query": 'select * from "bars"'})
+        )
+        await asyncio.to_thread(stub.read_started.wait, 5)
+
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+
+        await asyncio.to_thread(stub.read_finished.wait, 5)
+
+        assert stub.request_cancel_calls >= 1
+        assert stub.interrupt_calls == 0
+        assert stub.close_calls == 0
