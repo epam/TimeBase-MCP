@@ -164,6 +164,11 @@ class MCPSettings(BaseSettings):
         validation_alias=SettingsEnv.TIMEBASE_HTTP_URL,
         description="TimeBase HTTP API base URL.",
     )
+    tb_read_only: bool = Field(
+        default=False,
+        validation_alias=SettingsEnv.TIMEBASE_READ_ONLY,
+        description="Read-only mode for TimeBase connections.",
+    )
     servers: Annotated[list[ServerConfig] | None, NoDecode] = Field(
         default=None,
         validation_alias=SettingsEnv.TIMEBASE_SERVERS,
@@ -562,6 +567,7 @@ class MCPSettings(BaseSettings):
             oauth2_scope=self.tb_oauth2_scope,
             oauth2_token_params=self.tb_oauth2_token_params,
             http_base_url=self.tb_http_url,
+            read_only=self.tb_read_only,
         )
 
     def resolve_servers(self) -> list[ServerConfig]:

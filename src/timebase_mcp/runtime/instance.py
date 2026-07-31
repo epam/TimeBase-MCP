@@ -59,6 +59,7 @@ class TimeBaseInstanceConfig:
     tb_oauth2_scope: str | None = None
     tb_oauth2_token_params: dict[str, str] | None = None
     http_base_url: str | None = None
+    read_only: bool = False
     # Bearer token forwarded from the authenticated MCP caller (forward_identity).
     access_token: str | None = None
     access_token_username: str | None = None
@@ -67,7 +68,12 @@ class TimeBaseInstanceConfig:
     auto_auth_error: str | None = None
 
     @classmethod
-    def from_server_config(cls, server: ServerConfig) -> TimeBaseInstanceConfig:
+    def from_server_config(
+        cls,
+        server: ServerConfig,
+        *,
+        default_read_only: bool = False,
+    ) -> TimeBaseInstanceConfig:
         return cls(
             tb_url=server.url,
             description=server.description,
@@ -80,6 +86,9 @@ class TimeBaseInstanceConfig:
             tb_oauth2_scope=server.oauth2_scope,
             tb_oauth2_token_params=server.oauth2_token_params,
             http_base_url=server.http_base_url,
+            read_only=(
+                server.read_only if server.read_only is not None else default_read_only
+            ),
         )
 
     @property

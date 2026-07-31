@@ -45,6 +45,7 @@ def register_system_tools(mcp: MCPServer) -> None:
             TimeBaseInstanceInfo(
                 name=instance.key,
                 description=instance.config.description,
+                read_only=instance.config.read_only,
             )
             for instance in runtime.instances.values()
         ]

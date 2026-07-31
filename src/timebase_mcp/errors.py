@@ -30,6 +30,10 @@ class TimeBaseOperationStateError(TimeBaseOperationError):
     """Raised when runtime lifecycle state prevents an operation from proceeding."""
 
 
+class ReadOnlyInstanceError(TimeBaseMCPError):
+    """Raised when a query would modify a TimeBase instance configured read-only."""
+
+
 class StreamNotFoundError(TimeBaseMCPError):
     """Raised when a requested stream does not exist."""
 

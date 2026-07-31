@@ -22,6 +22,7 @@ INDEXED_SERVER_ENV_FIELDS: tuple[tuple[str, str], ...] = (
     ("DESCRIPTION", "description"),
     ("USERNAME", "username"),
     ("PASSWORD", "password"),
+    ("READ_ONLY", "read_only"),
 )
 
 
@@ -143,6 +144,10 @@ class ServerConfig(BaseModel):
         default=None,
         description="Base URL of the TimeBase HTTP API. Defaults are derived "
         "from the TB URL when omitted.",
+    )
+    read_only: bool | None = Field(
+        default=None,
+        description="Open connections to this server in read-only mode.",
     )
 
     @field_validator("oauth2_scope", mode="before")

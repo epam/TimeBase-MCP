@@ -77,7 +77,7 @@ class EnterpriseTimeBaseClient(TimeBaseClient):
                 db = dxapi.TickDb.createFromUrl(self._instance.config.tb_url)
 
             db.setApplicationName(APP_NAME)
-            db.open(False)
+            db.open(self._instance.config.read_only)
         except TimeBaseConnectionError:
             raise
         except Exception as exc:
@@ -87,8 +87,9 @@ class EnterpriseTimeBaseClient(TimeBaseClient):
             ) from exc
 
         logger.info(
-            "Connected to TimeBase via enterprise client at %s",
+            "Connected to TimeBase via enterprise client at %s (%s)",
             self._instance.config.tb_url,
+            "read-only" if self._instance.config.read_only else "read-write",
         )
         self._db = db
         return db

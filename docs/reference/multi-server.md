@@ -8,7 +8,7 @@ Connect one `timebase-mcp` process to multiple TimeBase servers. The server expo
 | Local MCP client (hand-edited) | Indexed env vars: `TIMEBASE_SERVERS_0_URL`, ... |
 | Local MCP client (rich config) | Edit a JSON file -> `timebase-mcp servers-print file.json` -> paste into `TIMEBASE_SERVERS` |
 
-Per-server OAuth stays in **JSON or file** only. Indexed env supports URL, name, description, and basic auth (`username` / `password`).
+Per-server OAuth stays in **JSON or file** only. Indexed env supports URL, name, description, basic auth (`username` / `password`) and `read_only`.
 
 ## File
 
@@ -47,6 +47,7 @@ Indices must be contiguous starting at `0`. Do not set `TIMEBASE_SERVERS` when u
 | `TIMEBASE_SERVERS_{n}_DESCRIPTION` | `description` |
 | `TIMEBASE_SERVERS_{n}_USERNAME` | `username` |
 | `TIMEBASE_SERVERS_{n}_PASSWORD` | `password` |
+| `TIMEBASE_SERVERS_{n}_READ_ONLY` | `read_only` |
 
 ## JSON string
 

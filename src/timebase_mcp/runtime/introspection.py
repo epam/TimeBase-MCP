@@ -24,6 +24,7 @@ def timebase_server_configuration(
         edition=get_detected_edition(instance),
         outbound_auth_mode=config.auth_mode,
         http_url=config.http_base_url,
+        read_only=config.read_only,
         dxapi_ssl_termination=dxapi_ssl_termination_enabled(),
         dxapi_ssl_trust_all=dxapi_ssl_trust_all_enabled(),
     )
