@@ -1,10 +1,11 @@
-from urllib.parse import unquote
-
 from mcp.server.mcpserver import MCPServer
 
 from timebase_mcp.runtime.operations import run_with_runtime
 from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.services import streams as stream_service
+
+# NOTE
+# MCP SDK v2 decodes template params internally, so we don't need to decode them in the resource handlers.
 
 
 def register_resources(mcp: MCPServer, runtime: TimeBaseRuntime) -> None:
@@ -52,7 +53,6 @@ def register_resources(mcp: MCPServer, runtime: TimeBaseRuntime) -> None:
         mime_type="text/plain",
     )
     async def instance_stream_catalog_resource(instance_key: str) -> str:
-        instance_key = unquote(instance_key)
         streams = await _run_resource_operation(
             lambda client: stream_service.list_streams(client),
             instance_key=instance_key,
@@ -74,7 +74,6 @@ def register_resources(mcp: MCPServer, runtime: TimeBaseRuntime) -> None:
     async def instance_stream_schema_resource(
         instance_key: str, stream_key: str
     ) -> str:
-        instance_key = unquote(instance_key)
         schema = await _run_resource_operation(
             lambda client: stream_service.get_stream_schema(client, stream_key),
             instance_key=instance_key,
