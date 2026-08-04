@@ -31,6 +31,7 @@ from timebase_mcp.runtime.state import build_runtime
 from timebase_mcp.server import create_server
 from timebase_mcp.tools import queries as query_tools
 from timebase_mcp.tools import streams as stream_tools
+from timebase_mcp.tools import system as system_tools
 from timebase_mcp.version import get_version
 
 
@@ -1389,3 +1390,59 @@ def test_build_server_configuration_reports_read_only_instances() -> None:
         True,
         False,
     ]
+
+
+@pytest.mark.anyio
+async def test_call_list_qql_functions_rejects_non_identifier_function_id(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    executed = False
+
+    def list_qql_functions(client, kind: str, function_id: str | None = None):
+        nonlocal executed
+        executed = True
+        return {}
+
+    monkeypatch.setattr(
+        query_tools.query_service, "list_qql_functions", list_qql_functions
+    )
+
+    async with client_session_factory(None) as client_session:
+        result = await client_session.call_tool(
+            "list_qql_functions",
+            {"function_id": "MAX' OR '1'='1"},
+        )
+
+    assert result.is_error is True
+    assert executed is False
+
+
+@pytest.mark.anyio
+async def test_call_get_timebase_activity_detail_rejects_empty_id(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    executed = False
+
+    async def get_activity_detail(*args, **kwargs):
+        nonlocal executed
+        executed = True
+        raise AssertionError("should not run")
+
+    monkeypatch.setattr(system_tools, "get_activity_detail", get_activity_detail)
+
+    async with client_session_factory(None) as client_session:
+        result = await client_session.call_tool(
+            "get_timebase_activity_detail",
+            {"kind": "cursor", "id": ""},
+        )
+
+    assert result.is_error is True
+    assert executed is False
