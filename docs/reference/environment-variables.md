@@ -8,7 +8,7 @@
 | `TIMEBASE_PASSWORD` | None | Password for `basic` auth. |
 | `TIMEBASE_AUTH_MODE` | `auto` | Outbound mode: `auto`, `none`, `basic`, `oauth2_client_credentials`, `forward_identity`, `interactive`. |
 | `TIMEBASE_HTTP_URL` | derived | TimeBase HTTP API base URL, used for OAuth discovery and HTTP diagnostics. MCP derives this from `TIMEBASE_URL` when unset and also tries port `8021` when the native URL uses port default `8011`. Set explicitly for proxies, custom ports, or non-default paths. |
-| `TIMEBASE_READ_ONLY` | `false` | Whether TimeBase connections are opened in read-only mode. |
+| `TIMEBASE_READ_ONLY` | `false` | Whether TimeBase connections are opened in read-only mode, see [Protecting TimeBase](./protecting-timebase.md). |
 | `TIMEBASE_OAUTH2_TOKEN_URL` | None | Token endpoint for outbound service-account client credentials. |
 | `TIMEBASE_OAUTH2_CLIENT_ID` | None / discovered | OAuth2 client ID for service-account auth, or a dedicated client-app override for local `interactive` login. |
 | `TIMEBASE_OAUTH2_CLIENT_SECRET` | None | OAuth2 client secret for service-account auth. |
