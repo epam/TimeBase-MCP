@@ -108,6 +108,16 @@ def compile_query(client: TimeBaseClient, query: str) -> CompileQQLResult:
     return CompileQQLResult(valid=True)
 
 
+def validate_function_id(function_id: str) -> str:
+    """Fail unless the function id is a plain identifier."""
+    if not function_id.isidentifier():
+        raise ValueError(
+            "function_id must be a QQL function identifier: letters, digits and "
+            "underscores, not starting with a digit."
+        )
+    return function_id
+
+
 def list_qql_functions(
     client: TimeBaseClient,
     kind: Literal["all", "stateless", "stateful"] = "all",
@@ -142,11 +152,8 @@ def _qql_functions_query(
     if function_id is None:
         return f"SELECT {source} AS FUNCS"
 
-    escaped_function_id = function_id.replace("'", "''")
-    return (
-        f"SELECT f AS FUNCS ARRAY JOIN {source} AS f "
-        f"WHERE f.id == '{escaped_function_id}'"
-    )
+    validate_function_id(function_id)
+    return f"SELECT f AS FUNCS ARRAY JOIN {source} AS f WHERE f.id == '{function_id}'"
 
 
 def _format_query_messages_preview(
