@@ -122,13 +122,13 @@ Set `TIMEBASE_AUTH_MODE` (or leave it `auto`):
 
 ## 6. Remote operation limits
 
-Shared remote servers should limit concurrent TimeBase operations so one busy agent session cannot exhaust the server. These settings apply globally across all callers.
+Shared remote servers should limit concurrent TimeBase operations so one busy agent session cannot exhaust the server. These settings apply globally across all callers. To stop agents modifying TimeBase as well, see [Protecting TimeBase](reference/protecting-timebase.md).
 
 | Variable | Default | What it does |
 | - | - | - |
 | `MCP_MAX_CONCURRENT_OPS` | `0` (unlimited) | Max concurrent TimeBase operations in flight. When the limit is reached, new tool calls fail with a backpressure error. |
 | `MCP_MAX_IDLE_CLIENTS` | `0` (auto) | Max idle TimeBase connections kept per shared pool. `0` selects `max(1, MCP_MAX_CONCURRENT_OPS / 2)`. |
-| `MCP_OPERATION_TIMEOUT_SECONDS` | `0` (disabled) | Per-operation deadline in seconds. |
+| `MCP_OPERATION_TIMEOUT_SECONDS` | `60` | Per-operation deadline in seconds. `0` disables it. |
 
 Per-user `forward_identity` pools do not keep idle connections between requests.
 
