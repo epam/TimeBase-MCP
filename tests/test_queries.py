@@ -351,17 +351,19 @@ def test_list_qql_functions_filters_by_function_id_server_side() -> None:
     assert result.stateful[0].id == "SUM"
 
 
-def test_list_qql_functions_escapes_function_id_filter() -> None:
-    query = (
-        "SELECT f AS FUNCS ARRAY JOIN stateless_functions() AS f WHERE f.id == 'O''HLC'"
-    )
-    client = StubQueryClient({query: []})
+@pytest.mark.parametrize(
+    "function_id",
+    ["MAX' OR '1'='1", "O'HLC", "math.abs", "1MAX", "A B", ""],
+)
+def test_list_qql_functions_rejects_non_identifier_function_id(
+    function_id: str,
+) -> None:
+    client = StubQueryClient()
 
-    result = list_qql_functions(client, "stateless", function_id="O'HLC")
+    with pytest.raises(ValueError, match="function_id must be"):
+        list_qql_functions(client, "stateless", function_id=function_id)
 
-    assert client.executed_queries == [query]
-    assert result.function_count == 0
-    assert result.overload_count == 0
+    assert client.executed_queries == []
 
 
 def test_list_qql_functions_raises_and_stops_when_cancelled() -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from timebase_mcp.config.env import dxapi_ssl_termination_enabled
 
@@ -29,6 +29,11 @@ def http_base_url_candidates(value: str | Sequence[str] | None) -> tuple[str, ..
         for candidate in candidates
         if (normalized := _normalize_http_base_url(candidate))
     )
+
+
+def quote_path_segment(value: str) -> str:
+    """Escape a caller-supplied value used as a single URL path segment."""
+    return quote(value, safe="")
 
 
 def build_tb_url(http_base_url: str, endpoint: str) -> str:

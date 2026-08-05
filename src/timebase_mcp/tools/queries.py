@@ -1,14 +1,23 @@
-from typing import Literal
+from typing import Annotated, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp_types import ToolAnnotations
-from pydantic import Field
+from pydantic import AfterValidator, Field
 
 from timebase_mcp.models.core import CompileQQLResult, QQLFunctionsResult
 from timebase_mcp.runtime.operations import run_with_context
 from timebase_mcp.services import queries as query_service
+from timebase_mcp.services.queries import validate_function_id
 from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.tools.common import InstanceName
+
+
+QQLFunctionId = Annotated[
+    str | None,
+    AfterValidator(
+        lambda value: None if value is None else validate_function_id(value)
+    ),
+]
 
 
 def register_query_tools(mcp: MCPServer) -> None:
@@ -84,10 +93,11 @@ def register_query_tools(mcp: MCPServer) -> None:
             default="all",
             description="Function category to return",
         ),
-        function_id: str | None = Field(
+        function_id: QQLFunctionId = Field(
             default=None,
             description=(
                 "Optional exact QQL function id to return, e.g. ABS or SMA. "
+                "Letters, digits and underscores only. "
                 "When provided, TimeBase filters overloads server-side."
             ),
         ),

@@ -138,6 +138,8 @@ def register_system_tools(mcp: MCPServer) -> None:
             description="Activity object kind to inspect.",
         ),
         id: str = Field(
+            min_length=1,
+            max_length=128,
             description="Cursor/loader numeric id, connection client id, or lock id/guid/client id.",
         ),
         instance_key: InstanceName = None,

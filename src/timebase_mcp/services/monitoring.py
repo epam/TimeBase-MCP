@@ -28,6 +28,7 @@ from timebase_mcp.clients.http.responses import (
     response_json_list,
 )
 from timebase_mcp.clients.http.transport import timebase_http_request
+from timebase_mcp.clients.http.urls import quote_path_segment
 
 ResultT = TypeVar("ResultT")
 ActivityKind = Literal["all", "cursors", "loaders", "connections", "locks"]
@@ -211,29 +212,30 @@ def _activity_detail_sync(
 ) -> TimeBaseActivityDetail:
     warnings: list[str] = []
     instruments = None
+    sanitized_id = quote_path_segment(id)
 
     if kind == "cursor":
-        detail = _required_dict(instance, f"/api/cursors/{id}")
+        detail = _required_dict(instance, f"/api/cursors/{sanitized_id}")
         if include_instruments:
             instruments = _instruments(
                 instance,
-                f"/api/cursors/{id}/instruments",
+                f"/api/cursors/{sanitized_id}/instruments",
                 offset=instrument_offset,
                 limit=instrument_limit,
                 filter_value=instrument_filter,
             )
     elif kind == "loader":
-        detail = _required_dict(instance, f"/api/loaders/{id}")
+        detail = _required_dict(instance, f"/api/loaders/{sanitized_id}")
         if include_instruments:
             instruments = _instruments(
                 instance,
-                f"/api/loaders/{id}/instruments",
+                f"/api/loaders/{sanitized_id}/instruments",
                 offset=instrument_offset,
                 limit=instrument_limit,
                 filter_value=instrument_filter,
             )
     elif kind == "connection":
-        detail = _required_dict(instance, f"/api/connections/{id}")
+        detail = _required_dict(instance, f"/api/connections/{sanitized_id}")
     else:
         detail = _find_lock(
             _optional_list(instance, "/api/locks", warnings=warnings), id

@@ -15,6 +15,7 @@ from timebase_mcp.clients.http.transport import (
 )
 from timebase_mcp.clients.http.urls import (
     build_tb_url,
+    quote_path_segment,
     derive_http_base_urls,
     http_base_url_candidates,
 )
@@ -98,6 +99,15 @@ def test_http_base_url_candidates_preserves_pathful_candidates() -> None:
         "https://example.com/tb",
         "https://example.com/tb",
     )
+
+
+def test_quote_path_segment_escapes_separators_and_keeps_plain_ids() -> None:
+    assert quote_path_segment("1") == "1"
+    assert quote_path_segment("c1") == "c1"
+    assert quote_path_segment("3f2b-9c1a_x.y~z") == "3f2b-9c1a_x.y~z"
+    assert quote_path_segment("../server/system") == "..%2Fserver%2Fsystem"
+    assert quote_path_segment("1?offset=9") == "1%3Foffset%3D9"
+    assert quote_path_segment("a#b") == "a%23b"
 
 
 def test_build_tb_url_accepts_root_or_tb_base() -> None:

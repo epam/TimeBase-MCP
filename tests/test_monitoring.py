@@ -448,3 +448,40 @@ async def test_monitoring_uses_operation_budget(
     with pytest.raises(Exception, match="Maximum concurrent TimeBase operations"):
         await get_timebase_status(runtime)
     await first
+
+
+@pytest.mark.parametrize(
+    ("id", "expected_segment"),
+    [
+        ("../server/system?gc=true", "..%2Fserver%2Fsystem%3Fgc%3Dtrue"),
+        ("1?offset=999", "1%3Foffset%3D999"),
+    ],
+)
+@pytest.mark.anyio
+async def test_get_activity_detail_escapes_the_id_path_segment(
+    monkeypatch: pytest.MonkeyPatch,
+    id: str,
+    expected_segment: str,
+) -> None:
+    requested: list[str] = []
+
+    def recording_request(method: str, url: str, **kwargs: object):
+        requested.append(url)
+        return _response(url, method=method)
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.http.transport.httpx2.request", recording_request
+    )
+
+    with pytest.raises(TimeBaseOperationError):
+        await get_timebase_activity_detail(
+            _runtime(),
+            kind="cursor",
+            id=id,
+            include_instruments=False,
+            instrument_offset=0,
+            instrument_limit=50,
+            instrument_filter=None,
+        )
+
+    assert any(url.endswith(f"/tb/api/cursors/{expected_segment}") for url in requested)
