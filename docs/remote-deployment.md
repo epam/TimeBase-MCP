@@ -45,6 +45,13 @@ If you use IdP inbound auth, set `MCP_AUTH_PUBLIC_URL` to that same external MCP
 MCP_AUTH_PUBLIC_URL=https://mcp.example.com/mcp
 ```
 
+Set `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` to the public endpoint's host and origin, so the server rejects requests with a mismatched `Host`/`Origin` header (DNS rebinding protection). Both are comma-delimited and unset by default:
+
+```dotenv
+MCP_ALLOWED_HOSTS=mcp.example.com
+MCP_ALLOWED_ORIGINS=https://mcp.example.com
+```
+
 ## 3. Configure inbound auth
 
 Choose one inbound mode.
