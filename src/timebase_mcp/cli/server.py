@@ -59,6 +59,12 @@ def warn_remote_operational_defaults(settings: MCPSettings) -> None:
             "non-loopback HTTP deployment. Set MCP_MAX_CONCURRENT_OPS to a "
             "positive value for shared remote servers."
         )
+    if settings.is_remote_http_bind and settings.transport_security is None:
+        logger.warning(
+            "MCP_ALLOWED_HOSTS/MCP_ALLOWED_ORIGINS are unset for a non-loopback "
+            "HTTP deployment. DNS rebinding protection is disabled; set both to "
+            "restrict accepted Host/Origin headers."
+        )
 
 
 def _raise_keyboard_interrupt(_signum: int, _frame: FrameType | None) -> None:
@@ -109,6 +115,7 @@ def run_server() -> int:
                     transport=active_settings.transport,
                     host=active_settings.host,
                     port=active_settings.port,
+                    transport_security=active_settings.transport_security,
                 )
     except KeyboardInterrupt:
         if active_settings.transport == "stdio" and should_log_terminal_status():
