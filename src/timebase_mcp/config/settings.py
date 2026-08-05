@@ -1,6 +1,7 @@
 import os
 from typing import Annotated
 
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
@@ -18,7 +19,7 @@ from timebase_mcp.config.normalizers import (
     normalize_log_level,
     normalize_oauth2_scope,
     normalize_oauth2_token_params,
-    normalize_required_scopes,
+    normalize_string_list,
 )
 from timebase_mcp.config.oauth import (
     OAUTH2_CONFIG_FIELDS,
@@ -120,6 +121,22 @@ class MCPSettings(BaseSettings):
         le=65535,
         validation_alias=SettingsEnv.MCP_PORT,
         description="Port for MCP server to listen on",
+    )
+    allowed_hosts: Annotated[list[str] | None, NoDecode] = Field(
+        default=None,
+        validation_alias=SettingsEnv.MCP_ALLOWED_HOSTS,
+        description=(
+            "Comma-delimited allowlist of acceptable HTTP Host header values. "
+            "When set, only listed hosts are accepted."
+        ),
+    )
+    allowed_origins: Annotated[list[str] | None, NoDecode] = Field(
+        default=None,
+        validation_alias=SettingsEnv.MCP_ALLOWED_ORIGINS,
+        description=(
+            "Comma-delimited allowlist of acceptable HTTP Origin header values. "
+            "When set, only listed origins are accepted."
+        ),
     )
     log_level: LogLevel = Field(
         default="INFO",
@@ -236,7 +253,26 @@ class MCPSettings(BaseSettings):
     @field_validator("auth_required_scopes", mode="before")
     @classmethod
     def normalize_required_scopes(cls, value: object) -> object:
-        return normalize_required_scopes(value)
+        return normalize_string_list(
+            value,
+            error_message="Scope values must be a string or a list of strings.",
+        )
+
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def normalize_allowed_hosts(cls, value: object) -> object:
+        return normalize_string_list(
+            value,
+            error_message="MCP_ALLOWED_HOSTS must be a comma-delimited string or a list of strings.",
+        )
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def normalize_allowed_origins(cls, value: object) -> object:
+        return normalize_string_list(
+            value,
+            error_message="MCP_ALLOWED_ORIGINS must be a comma-delimited string or a list of strings.",
+        )
 
     @field_validator("tb_oauth2_scope", mode="before")
     @classmethod
@@ -522,6 +558,16 @@ class MCPSettings(BaseSettings):
     @property
     def is_remote_http_bind(self) -> bool:
         return is_remote_http_bind(transport=self.transport, host=self.host)
+
+    @property
+    def transport_security(self) -> TransportSecuritySettings | None:
+        if self.allowed_hosts is None and self.allowed_origins is None:
+            return None
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=self.allowed_hosts or [],
+            allowed_origins=self.allowed_origins or [],
+        )
 
     @property
     def inbound_auth_enabled(self) -> bool:

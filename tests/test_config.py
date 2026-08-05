@@ -36,6 +36,51 @@ def test_settings_use_defaults_when_environment_is_not_set() -> None:
     assert settings.max_concurrent_ops == 0
     assert settings.max_idle_clients == 0
     assert settings.operation_timeout_seconds == 60
+    assert settings.allowed_hosts is None
+    assert settings.allowed_origins is None
+    assert settings.transport_security is None
+
+
+def test_settings_parse_allowed_hosts_and_origins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        SettingsEnv.MCP_ALLOWED_HOSTS, "mcp.example.com, other.example.com:443"
+    )
+    monkeypatch.setenv(SettingsEnv.MCP_ALLOWED_ORIGINS, "https://mcp.example.com")
+
+    settings = MCPSettings()
+
+    assert settings.allowed_hosts == ["mcp.example.com", "other.example.com:443"]
+    assert settings.allowed_origins == ["https://mcp.example.com"]
+
+    security = settings.transport_security
+    assert security is not None
+    assert security.enable_dns_rebinding_protection is True
+    assert security.allowed_hosts == ["mcp.example.com", "other.example.com:443"]
+    assert security.allowed_origins == ["https://mcp.example.com"]
+
+
+def test_settings_transport_security_enabled_with_only_one_list_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(SettingsEnv.MCP_ALLOWED_HOSTS, "mcp.example.com")
+
+    settings = MCPSettings()
+
+    security = settings.transport_security
+    assert security is not None
+    assert security.allowed_hosts == ["mcp.example.com"]
+    assert security.allowed_origins == []
+
+
+def test_settings_raise_validation_error_for_invalid_allowed_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(SettingsEnv.MCP_ALLOWED_HOSTS, "[1, 2]")
+
+    with pytest.raises(ValidationError, match="MCP_ALLOWED_HOSTS"):
+        MCPSettings()
 
 
 def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> None:

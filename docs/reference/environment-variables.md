@@ -16,7 +16,9 @@
 | `TIMEBASE_OAUTH2_TOKEN_PARAMS` | None | JSON object of extra client-credentials token form params. Cannot override reserved fields. |
 | `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `streamable-http`. |
 | `MCP_HOST` | `127.0.0.1` | HTTP bind host. For stdio, also the loopback host used for interactive OAuth redirect (`http://MCP_HOST:MCP_PORT/`). |
-| `MCP_PORT` | `8000` | HTTP bind port (1–65535). For stdio, also the loopback port used for interactive OAuth redirect. |
+| `MCP_PORT` | `8000` | HTTP bind port (1-65535). For stdio, also the loopback port used for interactive OAuth redirect. |
+| `MCP_ALLOWED_HOSTS` | None | Allowlist of acceptable HTTP `Host` header values, for DNS rebinding protection on `streamable-http`. |
+| `MCP_ALLOWED_ORIGINS` | None | Allowlist of acceptable HTTP `Origin` header values, for DNS rebinding protection on `streamable-http`. |
 | `MCP_MAX_CONCURRENT_OPS` | `0` | Max concurrent TimeBase operations (`0` disables limits). |
 | `MCP_MAX_IDLE_CLIENTS` | `0` (auto) | Max idle TimeBase connections per shared pool. `0` = `max(1, MCP_MAX_CONCURRENT_OPS / 2)`. Per-user `forward_identity` pools always use `0`. |
 | `MCP_OPERATION_TIMEOUT_SECONDS` | `60` | Per-operation timeout in seconds (`0` disables). |

@@ -125,6 +125,87 @@ def test_run_server_does_not_warn_for_limited_remote_http(
     assert "MCP_MAX_CONCURRENT_OPS=0 disables admission control" not in caplog.text
 
 
+def test_run_server_warns_for_remote_http_without_allowed_hosts(
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = MCPSettings(
+        transport="streamable-http",
+        host="0.0.0.0",
+        auth_api_keys_file="/var/run/keys.json",
+        max_concurrent_ops=10,
+    )
+    fake_server = Mock()
+    fake_server.run.side_effect = KeyboardInterrupt()
+
+    monkeypatch.setattr(server_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        server_module, "build_server", lambda settings=None: fake_server
+    )
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = server_module.run_server()
+
+    assert exit_code == 130
+    assert "MCP_ALLOWED_HOSTS/MCP_ALLOWED_ORIGINS are unset" in caplog.text
+
+
+def test_run_server_does_not_warn_when_allowed_hosts_configured(
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = MCPSettings(
+        transport="streamable-http",
+        host="0.0.0.0",
+        auth_api_keys_file="/var/run/keys.json",
+        max_concurrent_ops=10,
+        allowed_hosts=["mcp.example.com"],
+    )
+    fake_server = Mock()
+    fake_server.run.side_effect = KeyboardInterrupt()
+
+    monkeypatch.setattr(server_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        server_module, "build_server", lambda settings=None: fake_server
+    )
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = server_module.run_server()
+
+    assert exit_code == 130
+    assert "MCP_ALLOWED_HOSTS/MCP_ALLOWED_ORIGINS are unset" not in caplog.text
+
+
+def test_run_server_passes_transport_security_to_http_run(
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = MCPSettings(
+        transport="streamable-http",
+        host="0.0.0.0",
+        auth_api_keys_file="/var/run/keys.json",
+        allowed_hosts=["mcp.example.com"],
+        allowed_origins=["https://mcp.example.com"],
+    )
+    fake_server = Mock()
+    fake_server.run.side_effect = KeyboardInterrupt()
+
+    monkeypatch.setattr(server_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        server_module, "build_server", lambda settings=None: fake_server
+    )
+
+    exit_code = server_module.run_server()
+
+    assert exit_code == 130
+    _, run_kwargs = fake_server.run.call_args
+    transport_security = run_kwargs["transport_security"]
+    assert transport_security.allowed_hosts == ["mcp.example.com"]
+    assert transport_security.allowed_origins == ["https://mcp.example.com"]
+
+
 def test_run_server_does_not_warn_for_stdio_unlimited_ops(
     server_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

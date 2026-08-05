@@ -7,7 +7,7 @@ def normalize_log_level(value: object) -> object:
     return value
 
 
-def normalize_oauth2_scope(value: object) -> object:
+def normalize_oauth2_scope(value: object) -> str | None:
     if value in (None, ""):
         return None
 
@@ -57,8 +57,11 @@ def normalize_oauth2_token_params(value: object) -> object:
     return normalized_params
 
 
-def normalize_required_scopes(value: object) -> object:
-    """Accept a space/comma-delimited string or list and return a list[str]|None."""
+def normalize_string_list(value: object, *, error_message: str) -> list[str] | None:
+    """Accept a space/comma-delimited string, JSON array string, or list of either.
+
+    Returns a ``list[str]`` of the individual tokens, or ``None`` when empty.
+    """
     if value in (None, ""):
         return None
 
@@ -74,15 +77,18 @@ def normalize_required_scopes(value: object) -> object:
                 value = str(parsed)
 
     if isinstance(value, str):
-        tokens = [token for token in value.replace(",", " ").split() if token]
-        return tokens or None
+        return _split_tokens(value) or None
 
     if isinstance(value, list | tuple):
-        tokens = []
+        tokens: list[str] = []
         for item in value:
             if not isinstance(item, str):
-                raise ValueError("Scope values must be strings.")
-            tokens.extend(token for token in item.replace(",", " ").split() if token)
+                raise ValueError(error_message)
+            tokens.extend(_split_tokens(item))
         return tokens or None
 
-    raise ValueError("Scope values must be a string or a list of strings.")
+    raise ValueError(error_message)
+
+
+def _split_tokens(value: str) -> list[str]:
+    return [token for token in value.replace(",", " ").split() if token]
