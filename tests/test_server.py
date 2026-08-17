@@ -4,7 +4,8 @@ import threading
 import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 import httpx2
 import pytest
@@ -13,14 +14,16 @@ from mcp.client import Client
 from mcp.shared.exceptions import MCPError
 from mcp_types import TextContent, TextResourceContents
 from pydantic import SecretStr
+from typing_extensions import override
 
 import timebase_mcp.runtime.operations as operations_module
+from tests.stubs import StubPooledClient, StubTimeBaseClient
 from timebase_mcp import resources as resources_module
 from timebase_mcp.clients import factory as client_factory
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
+from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
 from timebase_mcp.errors import (
-    TimeBaseOperationCancelledError,
     TimeBaseOperationError,
     TimeBaseOperationLimitError,
     TimeBaseOperationTimeoutError,
@@ -34,11 +37,73 @@ from timebase_mcp.tools import streams as stream_tools
 from timebase_mcp.tools import system as system_tools
 from timebase_mcp.version import get_version
 
+_LOCAL_TOOL_NAMES = frozenset(
+    {"list_timebase_instances", "get_server_configuration"}
+)
 
-@dataclass
-class _StubStream:
-    key: str
-    description: str | None = None
+
+class _ResourceCatalogClient(StubTimeBaseClient):
+    def __init__(
+        self,
+        *,
+        instance_key: str | None,
+        description: str | None = None,
+    ) -> None:
+        super().__init__()
+        self._instance_key = instance_key
+        self._description = (
+            description if description is not None else f"desc:{instance_key}"
+        )
+
+    @override
+    def list_stream_infos(self) -> list[StreamInfo]:
+        return [StreamInfo(key="bars", description=self._description)]
+
+    @override
+    def get_stream(self, stream_key: str) -> str:
+        return stream_key
+
+    @override
+    def get_stream_schema_text(self, stream: str) -> str:
+        return f"schema:{self._instance_key}:{stream}"
+
+
+class _SpaceToolClient(StubTimeBaseClient):
+    def __init__(self, calls: list[tuple[str, str, str | None]]) -> None:
+        super().__init__()
+        self._calls = calls
+
+    @override
+    def get_stream(self, stream_key: str) -> str:
+        return stream_key
+
+    @override
+    def list_stream_spaces(self, stream: str) -> list[str]:
+        self._calls.append(("spaces", stream, None))
+        return ["", "blue"]
+
+    @override
+    def get_stream_space_time_range(
+        self,
+        stream_key: str,
+        stream: str,
+        space: str,
+    ) -> tuple[datetime | None, datetime | None]:
+        self._calls.append(("space_range", stream_key, space))
+        return None, None
+
+    @override
+    def read_stream_messages(
+        self,
+        stream: str,
+        reverse: bool,
+        count: int,
+        space: str | None,
+    ) -> list[dict[str, Any]]:
+        assert reverse is True
+        assert count == 3
+        self._calls.append(("messages", stream, space))
+        return [{"text": f"messages:{stream}:{space}"}]
 
 
 def _resource_text(result) -> list[str]:
@@ -102,6 +167,8 @@ async def test_list_tools_resources_and_templates(
     resources_result = await client_session.list_resources()
     templates_result = await client_session.list_resource_templates()
 
+    # Snapshots are reserved for ordered MCP surface catalogs (tool/resource
+    # names and URI templates). Annotation fields are asserted below.
     assert [tool.name for tool in tools_result.tools] == snapshot(
         [
             "list_timebase_instances",
@@ -121,68 +188,15 @@ async def test_list_tools_resources_and_templates(
             "list_qql_functions",
         ]
     )
-    assert {
-        tool.name: {
-            "read_only_hint": None
-            if tool.annotations is None
-            else tool.annotations.read_only_hint,
-            "open_world_hint": None
-            if tool.annotations is None
-            else tool.annotations.open_world_hint,
-        }
-        for tool in tools_result.tools
-    } == snapshot(
-        {
-            "list_timebase_instances": {
-                "read_only_hint": True,
-                "open_world_hint": False,
-            },
-            "get_server_configuration": {
-                "read_only_hint": True,
-                "open_world_hint": False,
-            },
-            "get_timebase_status": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "list_timebase_activity": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "get_timebase_activity_detail": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "list_streams": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "get_stream_schema": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "get_stream_time_range": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "list_stream_spaces": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "get_stream_space_time_range": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "get_stream_symbols": {
-                "read_only_hint": True,
-                "open_world_hint": True,
-            },
-            "get_stream_messages": {"read_only_hint": True, "open_world_hint": True},
-            "execute_query": {"read_only_hint": False, "open_world_hint": True},
-            "compile_query": {"read_only_hint": True, "open_world_hint": True},
-            "list_qql_functions": {"read_only_hint": True, "open_world_hint": True},
-        }
-    )
+    for tool in tools_result.tools:
+        assert tool.annotations is not None
+        if tool.name == "execute_query":
+            assert tool.annotations.read_only_hint is False
+            assert tool.annotations.destructive_hint is True
+            assert tool.annotations.idempotent_hint is False
+        else:
+            assert tool.annotations.read_only_hint is True
+        assert tool.annotations.open_world_hint is (tool.name not in _LOCAL_TOOL_NAMES)
     assert "instance_key" not in tools_result.tools[1].input_schema["properties"]
     assert "instance_key" in tools_result.tools[2].input_schema["properties"]
     assert [resource.name for resource in resources_result.resources] == snapshot(
@@ -217,17 +231,7 @@ async def test_read_resources_return_expected_text(
     async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
-        class StubClient:
-            def list_stream_infos(self) -> list[_StubStream]:
-                return [_StubStream("bars", f"desc:{instance_key}")]
-
-            def get_stream(self, stream_key: str) -> str:
-                return stream_key
-
-            def get_stream_schema_text(self, stream: str) -> str:
-                return f"schema:{instance_key}:{stream}"
-
-        return operation(StubClient())
+        return operation(_ResourceCatalogClient(instance_key=instance_key))
 
     monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
 
@@ -324,11 +328,12 @@ async def test_read_instance_scoped_resource_uses_selected_instance_when_multipl
     async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
-        class StubClient:
-            def list_stream_infos(self) -> list[_StubStream]:
-                return [_StubStream("bars", f"from {instance_key}")]
-
-        return operation(StubClient())
+        return operation(
+            _ResourceCatalogClient(
+                instance_key=instance_key,
+                description=f"from {instance_key}",
+            )
+        )
 
     monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
     settings = MCPSettings.model_validate(
@@ -366,11 +371,12 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
     async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
-        class StubClient:
-            def list_stream_infos(self) -> list[_StubStream]:
-                return [_StubStream("bars", f"from {instance_key}")]
-
-        return operation(StubClient())
+        return operation(
+            _ResourceCatalogClient(
+                instance_key=instance_key,
+                description=f"from {instance_key}",
+            )
+        )
 
     monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
     settings = MCPSettings.model_validate(
@@ -412,17 +418,12 @@ async def test_read_resource_template_params_are_decoded_once(
     async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
-        class StubClient:
-            def list_stream_infos(self) -> list[_StubStream]:
-                return [_StubStream("bars", f"from {instance_key}")]
-
-            def get_stream(self, stream_key: str) -> str:
-                return stream_key
-
-            def get_stream_schema_text(self, stream: str) -> str:
-                return f"schema:{instance_key}:{stream}"
-
-        return operation(StubClient())
+        return operation(
+            _ResourceCatalogClient(
+                instance_key=instance_key,
+                description=f"from {instance_key}",
+            )
+        )
 
     monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
 
@@ -559,40 +560,7 @@ async def test_call_stream_space_tools_pass_arguments(
         _ctx, operation, *, instance_key=None, report_progress=False
     ):
         selected_instances.append(instance_key)
-
-        class StubClient:
-            def raise_if_cancelled(self) -> None:
-                return None
-
-            def get_stream(self, stream_key: str) -> str:
-                return stream_key
-
-            def list_stream_spaces(self, stream: str):
-                calls.append(("spaces", stream, None))
-                return ["", "blue"]
-
-            def get_stream_space_time_range(
-                self,
-                stream_key: str,
-                stream: str,
-                space: str,
-            ):
-                calls.append(("space_range", stream_key, space))
-                return None, None
-
-            def read_stream_messages(
-                self,
-                stream: str,
-                reverse: bool,
-                count: int,
-                space: str | None = None,
-            ) -> list[dict[str, str]]:
-                assert reverse is True
-                assert count == 3
-                calls.append(("messages", stream, space))
-                return [{"text": f"messages:{stream}:{space}"}]
-
-        return operation(StubClient())
+        return operation(_SpaceToolClient(calls))
 
     monkeypatch.setattr(stream_tools, "run_with_context", run_stream_operation)
 
@@ -1232,42 +1200,15 @@ async def test_call_compile_query_tool_returns_structured_error_payload(
     }
 
 
-class _QueryStubClient:
+class _QueryStubClient(StubPooledClient):
     """Pooled-client stand-in whose query read is driven by the cancel flag."""
 
     def __init__(self, *, block_until_cancelled: bool) -> None:
+        super().__init__(key=DEFAULT_INSTANCE_KEY)
         self.block_until_cancelled = block_until_cancelled
         self.read_only = False
-        self.request_cancel_calls = 0
-        self.interrupt_calls = 0
-        self.close_calls = 0
-        self.rows_read = 0
         self.read_started = threading.Event()
         self.read_finished = threading.Event()
-        self._cancel = threading.Event()
-
-    def close(self) -> None:
-        self.close_calls += 1
-
-    def interrupt(self) -> None:
-        self.interrupt_calls += 1
-        self.close()
-
-    def bind_operation(self) -> None:
-        self._cancel = threading.Event()
-        self.rows_read = 0
-
-    def request_cancel(self) -> None:
-        self.request_cancel_calls += 1
-        self._cancel.set()
-
-    @property
-    def cancel_requested(self) -> bool:
-        return self._cancel.is_set()
-
-    def raise_if_cancelled(self) -> None:
-        if self.cancel_requested:
-            raise TimeBaseOperationCancelledError("stopped before completing")
 
     def read_query_messages(
         self, query_text: str, limit: int

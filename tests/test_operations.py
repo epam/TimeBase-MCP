@@ -9,6 +9,7 @@ import pytest
 from typing_extensions import override
 
 import timebase_mcp.runtime.operations as operations_module
+from tests.stubs import StubPooledClient as StubClient
 from timebase_mcp.clients.base import TimeBaseClient
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import (
@@ -23,43 +24,6 @@ from timebase_mcp.runtime.pool import TimeBaseConnectionPool, TimeBaseOperationB
 from timebase_mcp.runtime.state import build_runtime
 
 _ASYNCIO_WAIT_FOR = asyncio.wait_for
-
-
-class StubClient:
-    def __init__(self, *, key: str) -> None:
-        self.key = key
-        self.close_calls = 0
-        self.interrupt_calls = 0
-        self.request_cancel_calls = 0
-        self.rows_read = 0
-        self.closed_event = threading.Event()
-        self._closed = False
-        self._cancel_event: threading.Event | None = None
-
-    def close(self) -> None:
-        if self._closed:
-            return
-
-        self._closed = True
-        self.close_calls += 1
-        self.closed_event.set()
-
-    def interrupt(self) -> None:
-        self.interrupt_calls += 1
-        self.close()
-
-    def bind_operation(self) -> None:
-        self._cancel_event = threading.Event()
-        self.rows_read = 0
-
-    def request_cancel(self) -> None:
-        self.request_cancel_calls += 1
-        if self._cancel_event is not None:
-            self._cancel_event.set()
-
-    @property
-    def cancel_requested(self) -> bool:
-        return self._cancel_event is not None and self._cancel_event.is_set()
 
 
 def _wait_for_test_release(

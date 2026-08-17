@@ -16,6 +16,7 @@ from mcp.server.auth.provider import AccessToken
 from pydantic import ValidationError
 
 import timebase_mcp.clients.http.transport as http_transport_module
+from tests.stubs import StubPooledClient
 from timebase_mcp.auth import keystore
 from timebase_mcp.auth.discovery import (
     InteractiveEndpoints,
@@ -1045,41 +1046,6 @@ def test_trust_all_warning_not_emitted_when_verification_enabled(
     assert "DXAPI_SSL_TRUST_ALL=true disables TLS" not in caplog.text
 
 
-class _StubClient:
-    def __init__(self, *, key: str) -> None:
-        self.key = key
-
-    def close(self) -> None:
-        return
-
-    def interrupt(self) -> None:
-        return
-
-    def bind_operation(self) -> None:
-        return None
-
-    def request_cancel(self) -> None:
-        return
-
-
-class _TrackingStubClient:
-    def __init__(self, *, key: str) -> None:
-        self.key = key
-        self.close_calls = 0
-
-    def close(self) -> None:
-        self.close_calls += 1
-
-    def interrupt(self) -> None:
-        self.close()
-
-    def bind_operation(self) -> None:
-        return None
-
-    def request_cancel(self) -> None:
-        return
-
-
 def _forward_identity_settings() -> MCPSettings:
     return MCPSettings(
         transport="streamable-http",
@@ -1093,10 +1059,10 @@ def _forward_identity_settings() -> MCPSettings:
 async def test_forward_identity_does_not_keep_idle_connections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    created_clients: list[_TrackingStubClient] = []
+    created_clients: list[StubPooledClient] = []
 
     def build_client(instance):
-        client = _TrackingStubClient(key=instance.key)
+        client = StubPooledClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -1136,7 +1102,7 @@ async def test_forward_identity_uses_per_principal_pool(
 
     def build_client(instance):
         captured.append(instance.config)
-        return _StubClient(key=instance.key)
+        return StubPooledClient(key=instance.key)
 
     monkeypatch.setattr(
         "timebase_mcp.clients.factory.create_timebase_client", build_client
@@ -1170,11 +1136,11 @@ async def test_forward_identity_rotates_pool_when_principal_token_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list = []
-    created_clients: list[_StubClient] = []
+    created_clients: list[StubPooledClient] = []
 
     def build_client(instance):
         captured.append(instance.config)
-        client = _StubClient(key=instance.key)
+        client = StubPooledClient(key=instance.key)
         created_clients.append(client)
         return client
 
@@ -1405,7 +1371,7 @@ def test_interactive_provider_token_expiry() -> None:
 def _patch_auto_client_creation(monkeypatch: pytest.MonkeyPatch):
     captured_configs: list[TimeBaseInstanceConfig] = []
 
-    class _AutoClient(_StubClient):
+    class _AutoClient(StubPooledClient):
         def __init__(self, instance: TimeBaseInstanceRuntime) -> None:
             super().__init__(key=instance.key)
             self.config = instance.config

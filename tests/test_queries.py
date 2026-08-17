@@ -1,25 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from typing_extensions import override
 
-from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
+from tests.stubs import StubTimeBaseClient, stub_instance
 from timebase_mcp.errors import ReadOnlyInstanceError, TimeBaseOperationCancelledError
-from timebase_mcp.models.core import StreamInfo
-from timebase_mcp.runtime.instance import (
-    TimeBaseInstanceConfig,
-    TimeBaseInstanceRuntime,
-)
 from timebase_mcp.services.qql_functions import normalize_qql_functions
 from timebase_mcp.services.queries import execute_query, list_qql_functions
 
 
-class StubQueryClient(TimeBaseClient):
+class StubQueryClient(StubTimeBaseClient):
     def __init__(
         self,
         messages_by_query: dict[str, list[dict[str, Any]]] | None = None,
@@ -27,77 +20,10 @@ class StubQueryClient(TimeBaseClient):
         read_only: bool = False,
         tokens: list[Any] | None = None,
     ) -> None:
-        super().__init__(
-            TimeBaseInstanceRuntime(
-                key=DEFAULT_INSTANCE_KEY,
-                config=TimeBaseInstanceConfig(
-                    tb_url="dxtick://localhost:8011",
-                    read_only=read_only,
-                ),
-            )
-        )
+        super().__init__(stub_instance(read_only=read_only))
         self.messages_by_query = messages_by_query or {}
         self.tokens = tokens or []
         self.executed_queries: list[str] = []
-
-    @override
-    def open(self) -> object:
-        return object()
-
-    @override
-    def close(self) -> None:
-        return None
-
-    @override
-    def require_db(self) -> object:
-        return object()
-
-    @override
-    def get_stream(self, stream_key: str) -> object:
-        raise NotImplementedError
-
-    @override
-    def get_stream_schema_text(self, stream: object) -> str:
-        raise NotImplementedError
-
-    @override
-    def list_stream_symbols(self, stream: object) -> list[str]:
-        raise NotImplementedError
-
-    @override
-    def list_stream_infos(self) -> list[StreamInfo]:
-        raise NotImplementedError
-
-    @override
-    def get_stream_time_range(
-        self,
-        stream_key: str,
-        stream: object,
-    ) -> tuple[datetime | None, datetime | None]:
-        raise NotImplementedError
-
-    @override
-    def list_stream_spaces(self, stream: object) -> list[str] | None:
-        raise NotImplementedError
-
-    @override
-    def get_stream_space_time_range(
-        self,
-        stream_key: str,
-        stream: object,
-        space: str,
-    ) -> tuple[datetime | None, datetime | None]:
-        raise NotImplementedError
-
-    @override
-    def read_stream_messages(
-        self,
-        stream: object,
-        reverse: bool,
-        count: int,
-        space: str | None,
-    ) -> list[dict[str, Any]]:
-        raise NotImplementedError
 
     @override
     def read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:

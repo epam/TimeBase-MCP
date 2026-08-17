@@ -5,13 +5,7 @@ from typing import Any
 
 from typing_extensions import override
 
-from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
-from timebase_mcp.models.core import StreamInfo
-from timebase_mcp.runtime.instance import (
-    TimeBaseInstanceConfig,
-    TimeBaseInstanceRuntime,
-)
+from tests.stubs import StubTimeBaseClient, stub_instance
 from timebase_mcp.services import streams as stream_service
 
 
@@ -28,45 +22,16 @@ class StubStream:
         self.space_time_ranges = space_time_ranges or {}
 
 
-class StubClient(TimeBaseClient):
+class StubClient(StubTimeBaseClient):
     def __init__(self, stream: StubStream) -> None:
-        super().__init__(
-            TimeBaseInstanceRuntime(
-                key=DEFAULT_INSTANCE_KEY,
-                config=TimeBaseInstanceConfig(tb_url="dxtick://localhost:8011"),
-            )
-        )
+        super().__init__(stub_instance())
         self.stream = stream
         self.read_messages_calls: list[tuple[bool, int, str | None]] = []
-
-    @override
-    def open(self) -> object:
-        return object()
-
-    @override
-    def close(self) -> None:
-        pass
-
-    @override
-    def require_db(self) -> object:
-        return object()
 
     @override
     def get_stream(self, stream_key: str) -> StubStream:
         assert stream_key == "bars"
         return self.stream
-
-    @override
-    def get_stream_schema_text(self, stream: Any) -> str:
-        return "schema"
-
-    @override
-    def list_stream_symbols(self, stream: Any) -> list[str]:
-        return []
-
-    @override
-    def list_stream_infos(self) -> list[StreamInfo]:
-        return []
 
     @override
     def get_stream_time_range(
@@ -112,14 +77,6 @@ class StubClient(TimeBaseClient):
     ) -> list[dict[str, Any]]:
         self.read_messages_calls.append((reverse, count, space))
         return [{"symbol": "AAPL"}]
-
-    @override
-    def read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:
-        return []
-
-    @override
-    def compile_query_tokens(self, query_text: str) -> list[Any]:
-        return []
 
 
 def test_get_stream_time_range_returns_utc_datetimes() -> None:

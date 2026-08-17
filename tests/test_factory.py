@@ -1,16 +1,15 @@
 from dataclasses import dataclass, field
-from datetime import datetime
 
 import pytest
 from pydantic import SecretStr
 from typing_extensions import override
 
+from tests.stubs import StubTimeBaseClient
 from timebase_mcp.clients import factory
 from timebase_mcp.clients.base import TimeBaseClient
 from timebase_mcp.config.types import Edition
 from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
 from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
-from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.runtime.instance import (
     TimeBaseInstanceConfig,
     TimeBaseInstanceRuntime,
@@ -30,7 +29,7 @@ class ClientState:
     )
 
 
-class StubTimeBaseClient(TimeBaseClient):
+class FactoryTimeBaseClient(StubTimeBaseClient):
     edition: Edition
 
     def __init__(
@@ -66,63 +65,6 @@ class StubTimeBaseClient(TimeBaseClient):
         if not self._is_open:
             return self.open()
         return f"{self.edition}-db"
-
-    @override
-    def get_stream(self, stream_key: str) -> object:
-        raise NotImplementedError
-
-    @override
-    def get_stream_schema_text(self, stream: object) -> str:
-        raise NotImplementedError
-
-    @override
-    def list_stream_symbols(self, stream: object) -> list[str]:
-        raise NotImplementedError
-
-    @override
-    def list_stream_infos(self) -> list[StreamInfo]:
-        raise NotImplementedError
-
-    @override
-    def get_stream_time_range(
-        self,
-        stream_key: str,
-        stream: object,
-    ) -> tuple[datetime | None, datetime | None]:
-        raise NotImplementedError
-
-    @override
-    def list_stream_spaces(self, stream: object) -> list[str] | None:
-        raise NotImplementedError
-
-    @override
-    def get_stream_space_time_range(
-        self,
-        stream_key: str,
-        stream: object,
-        space: str,
-    ) -> tuple[datetime | None, datetime | None]:
-        raise NotImplementedError
-
-    @override
-    def read_stream_messages(
-        self,
-        stream: object,
-        reverse: bool,
-        count: int,
-        space: str | None,
-    ) -> list[dict[str, object]]:
-        raise NotImplementedError
-
-    @override
-    def read_query_messages(
-        self, query_text: str, limit: int
-    ) -> list[dict[str, object]]:
-        raise NotImplementedError
-
-    @override
-    def compile_query_tokens(self, query_text: str) -> list[object]:
-        raise NotImplementedError
 
 
 @dataclass
@@ -171,8 +113,8 @@ def patch_create_client(
     def fake_create_client(
         instance: TimeBaseInstanceRuntime,
         edition: Edition,
-    ) -> StubTimeBaseClient:
-        return StubTimeBaseClient(
+    ) -> FactoryTimeBaseClient:
+        return FactoryTimeBaseClient(
             instance,
             state=client_state,
             edition=edition,
@@ -268,7 +210,7 @@ def test_create_timebase_client_warns_about_ignored_incompatible_client(
     with caplog.at_level("WARNING"):
         client = factory.create_timebase_client(build_instance_runtime())
 
-    assert isinstance(client, StubTimeBaseClient)
+    assert isinstance(client, FactoryTimeBaseClient)
     assert client.edition == "community"
     assert "Ignoring incompatible enterprise TimeBase client" in caplog.text
     assert "found dxapi-ee 5.5.72" in caplog.text
@@ -309,7 +251,7 @@ def test_create_timebase_client_prefers_enterprise_when_both_clients_connect(
 
     client = factory.create_timebase_client(harness.instance)
 
-    assert isinstance(client, StubTimeBaseClient)
+    assert isinstance(client, FactoryTimeBaseClient)
     assert client.edition == "enterprise"
     assert harness.client_state.opened_editions == ["enterprise"]
     assert harness.instance.resolved_edition == "enterprise"
@@ -346,7 +288,7 @@ def test_create_timebase_client_falls_back_on_known_protocol_mismatch(
 
     client = factory.create_timebase_client(harness.instance)
 
-    assert isinstance(client, StubTimeBaseClient)
+    assert isinstance(client, FactoryTimeBaseClient)
     assert client.edition == "community"
     assert harness.client_state.opened_editions == ["enterprise", "community"]
     assert harness.instance.resolved_edition == "community"
@@ -434,7 +376,7 @@ def test_create_timebase_client_uses_cached_detected_edition(
 
     client = factory.create_timebase_client(harness.instance)
 
-    assert isinstance(client, StubTimeBaseClient)
+    assert isinstance(client, FactoryTimeBaseClient)
     assert client.edition == "community"
     assert harness.client_state.opened_editions == ["community"]
 
