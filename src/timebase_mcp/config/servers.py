@@ -53,7 +53,9 @@ def servers_from_indexed_env() -> list[dict[str, object]] | None:
 def parse_servers_json_payload(
     payload: object, *, source: str
 ) -> list[dict[str, object]]:
-    if not isinstance(payload, list):
+    if not isinstance(payload, list) or not all(
+        isinstance(item, dict) for item in payload
+    ):
         raise ValueError(f"{source} must contain a JSON array of server objects.")
     return payload
 
