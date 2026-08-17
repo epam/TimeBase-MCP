@@ -453,7 +453,7 @@ def test_compile_query_shapes_range_diagnostic() -> None:
     assert result.error == "QQL compile error [at 6.7..12]."
     assert result.error_token == '"low"'
     assert result.error_context == (
-        '...fields include\n'
+        "...fields include\n"
         '      "high" FLOAT\n'
         '      "low" FLOAT and then enough trailing text to f...'
     )

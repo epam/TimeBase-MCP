@@ -220,9 +220,7 @@ def test_get_stream_symbols_rejects_invalid_cursor() -> None:
 
     other_stream_cursor = _cursor_for("other", offset=1, total_symbols=2)
     with pytest.raises(ValueError, match="Invalid cursor"):
-        stream_service.get_stream_symbols(
-            client, "bars", cursor=other_stream_cursor
-        )
+        stream_service.get_stream_symbols(client, "bars", cursor=other_stream_cursor)
 
 
 def test_get_stream_symbols_reports_changed_symbol_set() -> None:

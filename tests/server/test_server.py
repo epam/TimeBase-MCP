@@ -37,9 +37,7 @@ from timebase_mcp.tools import streams as stream_tools
 from timebase_mcp.tools import system as system_tools
 from timebase_mcp.version import get_version
 
-_LOCAL_TOOL_NAMES = frozenset(
-    {"list_timebase_instances", "get_server_configuration"}
-)
+_LOCAL_TOOL_NAMES = frozenset({"list_timebase_instances", "get_server_configuration"})
 
 
 class _ResourceCatalogClient(StubTimeBaseClient):
