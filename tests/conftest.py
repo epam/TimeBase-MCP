@@ -3,6 +3,7 @@ from collections.abc import Generator
 
 import pytest
 
+import timebase_mcp.clients.http.transport as http_transport_module
 from timebase_mcp.config.env import DXAPI_SSL_TERMINATION_ENV, DXAPI_SSL_TRUST_ALL_ENV
 from timebase_mcp.config.settings import SETTINGS_ENV_VARS
 
@@ -31,7 +32,10 @@ def isolated_dxapi_ssl_env(
     saved = {name: os.environ.get(name) for name in _DXAPI_SSL_ENV_VARS}
     for name in _DXAPI_SSL_ENV_VARS:
         os.environ.pop(name, None)
+    previous_warning = http_transport_module._trust_all_warning_emitted
+    http_transport_module._trust_all_warning_emitted = False
     yield
+    http_transport_module._trust_all_warning_emitted = previous_warning
     for name, value in saved.items():
         if value is None:
             os.environ.pop(name, None)

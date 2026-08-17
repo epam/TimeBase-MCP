@@ -9,7 +9,11 @@ from typing_extensions import override
 from tests.stubs import StubTimeBaseClient, stub_instance
 from timebase_mcp.errors import ReadOnlyInstanceError, TimeBaseOperationCancelledError
 from timebase_mcp.services.qql_functions import normalize_qql_functions
-from timebase_mcp.services.queries import execute_query, list_qql_functions
+from timebase_mcp.services.queries import (
+    compile_query,
+    execute_query,
+    list_qql_functions,
+)
 
 
 class StubQueryClient(StubTimeBaseClient):
@@ -19,10 +23,12 @@ class StubQueryClient(StubTimeBaseClient):
         *,
         read_only: bool = False,
         tokens: list[Any] | None = None,
+        compile_error: Exception | None = None,
     ) -> None:
         super().__init__(stub_instance(read_only=read_only))
         self.messages_by_query = messages_by_query or {}
         self.tokens = tokens or []
+        self.compile_error = compile_error
         self.executed_queries: list[str] = []
 
     @override
@@ -32,6 +38,8 @@ class StubQueryClient(StubTimeBaseClient):
 
     @override
     def compile_query_tokens(self, query_text: str) -> list[Any]:
+        if self.compile_error is not None:
+            raise self.compile_error
         return self.tokens
 
 
@@ -407,3 +415,77 @@ def test_writable_instance_runs_queries_without_classifying() -> None:
     execute_query(client, query)
 
     assert client.executed_queries == [query]
+
+
+@pytest.mark.parametrize("query", ["", "   ", "\n\t"])
+def test_compile_query_rejects_empty_query(query: str) -> None:
+    with pytest.raises(ValueError, match="query must not be empty"):
+        compile_query(StubQueryClient(), query)
+
+
+def test_compile_query_returns_valid_result() -> None:
+    result = compile_query(StubQueryClient(tokens=[]), 'select * from "bars"')
+
+    assert result.valid is True
+    assert result.error is None
+    assert result.error_token is None
+    assert result.error_context is None
+    assert result.error_position is None
+
+
+def test_compile_query_shapes_range_diagnostic() -> None:
+    # Context window is 40 chars on each side of the error span.
+    query = (
+        "SELECT *\n"
+        "FROM bars\n"
+        "WHERE\n"
+        "  fields include\n"
+        '      "high" FLOAT\n'
+        '      "low" FLOAT and then enough trailing text to force an ellipsis\n'
+    )
+    client = StubQueryClient(
+        compile_error=RuntimeError("QQL compile error [at 6.7..12].")
+    )
+
+    result = compile_query(client, query)
+
+    assert result.valid is False
+    assert result.error == "QQL compile error [at 6.7..12]."
+    assert result.error_token == '"low"'
+    assert result.error_context == (
+        '...fields include\n'
+        '      "high" FLOAT\n'
+        '      "low" FLOAT and then enough trailing text to f...'
+    )
+    assert result.error_position is not None
+    assert result.error_position.start_line == 6
+    assert result.error_position.start_column == 7
+    assert result.error_position.end_line == 6
+    assert result.error_position.end_column == 12
+
+
+def test_compile_query_shapes_point_diagnostic() -> None:
+    query = "SELECT\nx"
+    client = StubQueryClient(compile_error=RuntimeError("syntax error [at 2:3]"))
+
+    result = compile_query(client, query)
+
+    assert result.valid is False
+    assert result.error == "syntax error [at 2:3]"
+    assert result.error_position is not None
+    assert result.error_position.start_line == 2
+    assert result.error_position.start_column == 3
+    assert result.error_position.end_line == 2
+    assert result.error_position.end_column == 3
+
+
+def test_compile_query_keeps_unparseable_error_text() -> None:
+    client = StubQueryClient(compile_error=RuntimeError("compiler exploded"))
+
+    result = compile_query(client, 'select * from "bars"')
+
+    assert result.valid is False
+    assert result.error == "compiler exploded"
+    assert result.error_token is None
+    assert result.error_context is None
+    assert result.error_position is None

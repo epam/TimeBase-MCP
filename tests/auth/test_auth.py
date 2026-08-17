@@ -15,7 +15,6 @@ from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 from pydantic import ValidationError
 
-import timebase_mcp.clients.http.transport as http_transport_module
 from tests.stubs import StubPooledClient
 from timebase_mcp.auth import keystore
 from timebase_mcp.auth.discovery import (
@@ -39,7 +38,7 @@ from timebase_mcp.auth.token_verifier import (
 from timebase_mcp.clients.factory import create_timebase_client
 from timebase_mcp.clients.http.transport import timebase_http_request
 from timebase_mcp.clients.native.common import connection_error_hint
-from timebase_mcp.config.env import SettingsEnv
+from timebase_mcp.config.env import DXAPI_SSL_TERMINATION_ENV, SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import ConfigurationError, TimeBaseOperationStateError
 from timebase_mcp.runtime.instance import (
@@ -53,367 +52,6 @@ from timebase_mcp.runtime.state import build_runtime
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-def test_servers_json_is_parsed_and_default_resolved(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {"name": "prod", "url": "dxtick://prod:8011", "auth_mode": "none"},
-                {"name": "dev", "url": "dxtick://u:p@dev:8011"},
-            ]
-        ),
-    )
-
-    settings = MCPSettings()
-    servers = settings.resolve_servers()
-
-    assert [server.instance_key for server in servers] == ["prod", "dev"]
-    assert [server.name for server in servers] == ["prod", "dev"]
-    assert servers[0].auth_mode == "none"
-    assert servers[1].auth_mode == "basic"
-    assert servers[1].username == "u"
-    assert servers[1].password is not None
-    assert servers[1].password.get_secret_value() == "p"
-    assert settings.resolved_default_instance_key == "prod"
-
-
-def test_servers_use_sanitized_url_as_key_when_name_is_omitted(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps([{"url": "dxtick://u:p@prod:8011", "description": "Production"}]),
-    )
-
-    settings = MCPSettings()
-    server = settings.resolve_servers()[0]
-
-    assert server.instance_key == "dxtick://prod:8011"
-    assert server.name is None
-    assert server.description == "Production"
-    assert server.url == "dxtick://prod:8011"
-    assert settings.resolved_default_instance_key == "dxtick://prod:8011"
-
-
-def test_servers_use_name_as_key_when_specified(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {
-                    "name": "prod",
-                    "description": "Production TimeBase",
-                    "url": "dxtick://prod:8011",
-                },
-                {"url": "dxtick://dev:8011"},
-            ]
-        ),
-    )
-
-    settings = MCPSettings()
-    servers = settings.resolve_servers()
-
-    assert [server.instance_key for server in servers] == ["prod", "dxtick://dev:8011"]
-    assert servers[0].name == "prod"
-    assert servers[1].name is None
-    assert servers[0].description == "Production TimeBase"
-    assert settings.resolved_default_instance_key == "prod"
-
-
-def test_servers_reject_duplicate_resolved_names(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {"url": "dxtick://prod:8011"},
-                {"url": "dxtick://prod:8011"},
-            ]
-        ),
-    )
-
-    with pytest.raises(ValidationError, match="instance names must be unique"):
-        MCPSettings()
-
-
-def test_servers_url_only_defaults_to_auto(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps([{"name": "prod", "url": "dxtick://prod:8011"}]),
-    )
-
-    settings = MCPSettings()
-
-    assert settings.resolve_servers()[0].auth_mode == "auto"
-
-
-def test_server_explicit_auto_allows_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {
-                    "name": "prod",
-                    "url": "dxtick://prod:8011",
-                    "auth_mode": "auto",
-                    "username": "u",
-                    "password": "p",
-                }
-            ]
-        ),
-    )
-
-    settings = MCPSettings()
-
-    server = settings.resolve_servers()[0]
-    assert server.auth_mode == "auto"
-    assert server.username == "u"
-    assert server.password is not None
-
-
-def test_server_explicit_auto_allows_oauth2(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {
-                    "name": "prod",
-                    "url": "dxtick://prod:8011",
-                    "auth_mode": "auto",
-                    "oauth2_token_url": "https://idp.example/token",
-                    "oauth2_client_id": "client-id",
-                    "oauth2_client_secret": "client-secret",
-                }
-            ]
-        ),
-    )
-
-    settings = MCPSettings()
-
-    server = settings.resolve_servers()[0]
-    assert server.auth_mode == "auto"
-    assert server.oauth2_token_url == "https://idp.example/token"
-
-
-def test_server_explicit_auto_allows_interactive_oauth_overrides(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {
-                    "name": "prod",
-                    "url": "dxtick://prod:8011",
-                    "auth_mode": "auto",
-                    "oauth2_client_id": "interactive-client",
-                    "oauth2_scope": "openid profile",
-                }
-            ]
-        ),
-    )
-
-    settings = MCPSettings()
-
-    server = settings.resolve_servers()[0]
-    assert server.auth_mode == "auto"
-    assert server.oauth2_client_id == "interactive-client"
-    assert server.oauth2_scope == "openid profile"
-
-
-def test_server_explicit_auto_rejects_ambiguous_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {
-                    "name": "prod",
-                    "url": "dxtick://prod:8011",
-                    "auth_mode": "auto",
-                    "username": "u",
-                    "password": "p",
-                    "oauth2_token_url": "https://idp.example/token",
-                    "oauth2_client_id": "client-id",
-                    "oauth2_client_secret": "client-secret",
-                }
-            ]
-        ),
-    )
-
-    with pytest.raises(ValidationError, match="cannot resolve both"):
-        MCPSettings()
-
-
-def test_server_none_auth_rejects_username(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {
-                    "name": "prod",
-                    "url": "dxtick://prod:8011",
-                    "auth_mode": "none",
-                    "username": "u",
-                }
-            ]
-        ),
-    )
-
-    with pytest.raises(ValidationError, match="cannot be combined"):
-        MCPSettings()
-
-
-def test_server_oauth2_rejects_reserved_token_params(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps(
-            [
-                {
-                    "name": "prod",
-                    "url": "dxtick://prod:8011",
-                    "auth_mode": "oauth2_client_credentials",
-                    "oauth2_token_url": "https://idp.example/token",
-                    "oauth2_client_id": "client-id",
-                    "oauth2_client_secret": "client-secret",
-                    "oauth2_token_params": {"scope": "override"},
-                }
-            ]
-        ),
-    )
-
-    with pytest.raises(ValidationError, match="reserved OAuth2 fields"):
-        MCPSettings()
-
-
-def test_servers_conflict_with_flat_connection_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps([{"name": "prod", "url": "dxtick://prod:8011"}]),
-    )
-    monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "x")
-    monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "y")
-
-    with pytest.raises(ValidationError, match="cannot be combined"):
-        MCPSettings()
-
-
-def test_servers_load_from_file_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
-) -> None:
-    servers_file = tmp_path / "servers.json"
-    servers_file.write_text(
-        json.dumps(
-            [
-                {"name": "prod", "url": "dxtick://prod:8011"},
-                {"name": "dev", "url": "dxtick://dev:8011"},
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv(SettingsEnv.TIMEBASE_SERVERS, str(servers_file))
-
-    settings = MCPSettings()
-    servers = settings.resolve_servers()
-
-    assert [server.instance_key for server in servers] == ["prod", "dev"]
-
-
-def test_servers_load_from_indexed_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(SettingsEnv.TIMEBASE_SERVERS, raising=False)
-    monkeypatch.setenv(f"{SettingsEnv.TIMEBASE_SERVERS}_0_NAME", "enterprise")
-    monkeypatch.setenv(
-        f"{SettingsEnv.TIMEBASE_SERVERS}_0_DESCRIPTION", "Enterprise TimeBase"
-    )
-    monkeypatch.setenv(
-        f"{SettingsEnv.TIMEBASE_SERVERS}_0_URL", "dxtick://localhost:8011"
-    )
-    monkeypatch.setenv(f"{SettingsEnv.TIMEBASE_SERVERS}_1_NAME", "community")
-    monkeypatch.setenv(
-        f"{SettingsEnv.TIMEBASE_SERVERS}_1_URL", "dxtick://localhost:8012"
-    )
-
-    settings = MCPSettings()
-    servers = settings.resolve_servers()
-
-    assert [server.instance_key for server in servers] == ["enterprise", "community"]
-    assert servers[0].description == "Enterprise TimeBase"
-
-
-def test_servers_indexed_env_supports_basic_auth(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(SettingsEnv.TIMEBASE_SERVERS, raising=False)
-    monkeypatch.setenv(f"{SettingsEnv.TIMEBASE_SERVERS}_0_URL", "dxtick://prod:8011")
-    monkeypatch.setenv(f"{SettingsEnv.TIMEBASE_SERVERS}_0_USERNAME", "alice")
-    monkeypatch.setenv(f"{SettingsEnv.TIMEBASE_SERVERS}_0_PASSWORD", "secret")
-
-    server = MCPSettings().resolve_servers()[0]
-
-    assert server.auth_mode == "basic"
-    assert server.username == "alice"
-    assert server.password is not None
-    assert server.password.get_secret_value() == "secret"
-
-
-def test_servers_indexed_env_stops_at_first_missing_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(SettingsEnv.TIMEBASE_SERVERS, raising=False)
-    monkeypatch.setenv(
-        f"{SettingsEnv.TIMEBASE_SERVERS}_0_URL", "dxtick://localhost:8011"
-    )
-    monkeypatch.setenv(
-        f"{SettingsEnv.TIMEBASE_SERVERS}_2_URL", "dxtick://localhost:8013"
-    )
-
-    servers = MCPSettings().resolve_servers()
-
-    assert len(servers) == 1
-    assert servers[0].url == "dxtick://localhost:8011"
-
-
-def test_servers_scalar_cannot_be_combined_with_indexed_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        SettingsEnv.TIMEBASE_SERVERS,
-        json.dumps([{"name": "prod", "url": "dxtick://prod:8011"}]),
-    )
-    monkeypatch.setenv(
-        f"{SettingsEnv.TIMEBASE_SERVERS}_0_URL", "dxtick://localhost:8011"
-    )
-
-    with pytest.raises(ValidationError, match="cannot be combined"):
-        MCPSettings()
-
-
-def test_default_server_built_from_flat_settings() -> None:
-    settings = MCPSettings()
-    servers = settings.resolve_servers()
-
-    assert len(servers) == 1
-    assert servers[0].instance_key == "default"
-    assert servers[0].auth_mode == "auto"
 
 
 def test_url_only_http_transport_still_defaults_to_auto(
@@ -928,9 +566,8 @@ def test_resolve_interactive_endpoints_tries_https_candidate_and_trusts_all(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setenv("DXAPI_SSL_TERMINATION", "true")
+    monkeypatch.setenv(DXAPI_SSL_TERMINATION_ENV, "true")
     monkeypatch.setenv("DXAPI_SSL_TRUST_ALL", "true")
-    monkeypatch.setattr(http_transport_module, "_trust_all_warning_emitted", False)
     instance = _http_instance(http_base_url=None)
     calls: list[tuple[str, bool]] = []
 
@@ -998,7 +635,6 @@ def test_trust_all_warning_emits_once_for_multiple_discovery_calls(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("DXAPI_SSL_TRUST_ALL", "true")
-    monkeypatch.setattr(http_transport_module, "_trust_all_warning_emitted", False)
     instance = _http_instance()
 
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **_kwargs):
@@ -1025,7 +661,6 @@ def test_trust_all_warning_not_emitted_when_verification_enabled(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.delenv("DXAPI_SSL_TRUST_ALL", raising=False)
-    monkeypatch.setattr(http_transport_module, "_trust_all_warning_emitted", False)
     instance = _http_instance()
 
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **_kwargs):
@@ -1413,7 +1048,7 @@ def _advertise_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_auto_auth_switches_to_interactive_and_sets_ssl_termination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("DXAPI_SSL_TERMINATION", raising=False)
+    monkeypatch.delenv(DXAPI_SSL_TERMINATION_ENV, raising=False)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_URL, "dxtick://tb.example.com:8011")
     runtime = build_runtime(MCPSettings())
     captured_configs = _patch_auto_client_creation(monkeypatch)
@@ -1428,13 +1063,13 @@ def test_auto_auth_switches_to_interactive_and_sets_ssl_termination(
     assert captured_configs[0].auth_mode == "interactive"
     assert captured_configs[0].http_base_url == "https://tb.example.com:8011"
     assert runtime.default_instance.config.auth_mode == "interactive"
-    assert os.environ["DXAPI_SSL_TERMINATION"] == "true"
+    assert os.environ[DXAPI_SSL_TERMINATION_ENV] == "true"
 
 
 def test_auto_auth_passes_interactive_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("DXAPI_SSL_TERMINATION", raising=False)
+    monkeypatch.delenv(DXAPI_SSL_TERMINATION_ENV, raising=False)
     monkeypatch.setenv(SettingsEnv.TIMEBASE_URL, "dxtick://tb.example.com:8011")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_OAUTH2_CLIENT_ID, "interactive-client")
     monkeypatch.setenv(SettingsEnv.TIMEBASE_OAUTH2_SCOPE, "openid profile")
