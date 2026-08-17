@@ -1,4 +1,5 @@
 APP_NAME = "TimeBase MCP Server"
+APP_WEBSITE_URL = "https://github.com/epam/TimeBase-MCP"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 DEFAULT_TIMEBASE_URL = "dxtick://localhost:8011"
