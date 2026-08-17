@@ -11,11 +11,6 @@ from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.server import create_server
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
 @pytest.fixture(scope="session")
 def integration_ping_url() -> str | None:
     ping_url = os.environ.get("TIMEBASE_PING_URL")

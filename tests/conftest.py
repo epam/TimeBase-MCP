@@ -10,6 +10,11 @@ from timebase_mcp.config.settings import SETTINGS_ENV_VARS
 _DXAPI_SSL_ENV_VARS = (DXAPI_SSL_TERMINATION_ENV, DXAPI_SSL_TRUST_ALL_ENV)
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 @pytest.fixture(autouse=True)
 def isolated_settings_env(
     monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest

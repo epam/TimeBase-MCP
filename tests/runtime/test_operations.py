@@ -80,11 +80,6 @@ async def _wait_for_thread_event(
     await _wait_until(event.is_set, failure_message, timeout_seconds=timeout_seconds)
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
 @pytest.mark.anyio
 async def test_run_with_runtime_reuses_client_from_instance_pool(
     monkeypatch: pytest.MonkeyPatch,
