@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -11,20 +10,18 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import LATEST_PROTOCOL_VERSION
 from starlette.testclient import TestClient
 
+from tests.support.mcp_http import (
+    PROTOCOL_VERSION,
+    build_client_meta,
+    build_modern_headers,
+    parse_jsonrpc_response,
+)
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.constants import APP_NAME, APP_WEBSITE_URL
 from timebase_mcp.server import create_server
 from timebase_mcp.version import get_version
 
-PROTOCOL_VERSION = "2026-07-28"
-_CLIENT_META = {
-    "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
-    "io.modelcontextprotocol/clientInfo": {
-        "name": "timebase-mcp-modern-smoke",
-        "version": "0.1.0",
-    },
-    "io.modelcontextprotocol/clientCapabilities": {},
-}
+_CLIENT_META = build_client_meta(client_name="timebase-mcp-modern-smoke")
 
 
 @pytest.fixture
@@ -81,17 +78,6 @@ def _post_mcp_raw(
     if include_meta:
         body_params["_meta"] = _CLIENT_META
 
-    headers = {
-        "accept": "application/json, text/event-stream",
-        "content-type": "application/json",
-    }
-    if protocol_version is not None:
-        headers["mcp-protocol-version"] = protocol_version
-    if include_method_header:
-        headers["mcp-method"] = method
-    if mcp_name is not None:
-        headers["mcp-name"] = mcp_name
-
     response = client.post(
         "/mcp",
         json={
@@ -100,50 +86,16 @@ def _post_mcp_raw(
             "method": method,
             "params": body_params,
         },
-        headers=headers,
+        headers=build_modern_headers(
+            method=method,
+            mcp_name=mcp_name,
+            protocol_version=protocol_version,
+            include_method_header=include_method_header,
+        ),
     )
-    return response, _parse_jsonrpc_body(response)
-
-
-def _parse_jsonrpc_body(response: Any) -> dict[str, Any]:
-    content_type = response.headers.get("content-type", "").lower()
-    if content_type.startswith("application/json"):
-        payload = response.json()
-    elif content_type.startswith("text/event-stream"):
-        payload = _first_sse_json_message(response.text)
-    elif not response.text:
-        raise AssertionError("Empty MCP response body")
-    else:
-        raise AssertionError(f"Unexpected content-type: {content_type!r}")
-
-    assert isinstance(payload, dict)
-    return payload
-
-
-def _first_sse_json_message(text: str) -> dict[str, Any]:
-    event_data: list[str] = []
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip("\r")
-        if not line:
-            if event_data:
-                value = json.loads("\n".join(event_data))
-                if isinstance(value, dict) and ("result" in value or "error" in value):
-                    return value
-                event_data = []
-            continue
-        if line.startswith(":"):
-            continue
-        field, _, value = line.partition(":")
-        if field != "data":
-            continue
-        if value.startswith(" "):
-            value = value[1:]
-        event_data.append(value)
-    if event_data:
-        value = json.loads("\n".join(event_data))
-        if isinstance(value, dict):
-            return value
-    raise AssertionError("SSE response did not include a JSON-RPC message")
+    payload = parse_jsonrpc_response(response)
+    assert payload is not None
+    return response, payload
 
 
 def _assert_server_info(meta: dict[str, Any]) -> None:

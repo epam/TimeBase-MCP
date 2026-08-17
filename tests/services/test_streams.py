@@ -10,6 +10,7 @@ from typing_extensions import override
 
 from tests.stubs import StubTimeBaseClient, stub_instance
 from timebase_mcp.errors import StreamNotFoundError
+from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.services import streams as stream_service
 
 
@@ -28,7 +29,7 @@ class StubStream:
         self.symbols = symbols or []
 
 
-class StubClient(StubTimeBaseClient):
+class StreamServiceStubClient(StubTimeBaseClient):
     def __init__(self, stream: StubStream) -> None:
         super().__init__(stub_instance())
         self.stream = stream
@@ -99,6 +100,16 @@ class _MissingStreamClient(StubTimeBaseClient):
         raise StreamNotFoundError(stream_key)
 
 
+class _CatalogStubClient(StubTimeBaseClient):
+    def __init__(self, streams: list[StreamInfo]) -> None:
+        super().__init__(stub_instance())
+        self._streams = streams
+
+    @override
+    def list_stream_infos(self) -> list[StreamInfo]:
+        return list(self._streams)
+
+
 def _cursor_for(stream_key: str, offset: int, total_symbols: int) -> str:
     payload = json.dumps(
         {
@@ -111,8 +122,33 @@ def _cursor_for(stream_key: str, offset: int, total_symbols: int) -> str:
     return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
 
 
+def test_list_streams_sorts_by_key() -> None:
+    client = _CatalogStubClient(
+        [
+            StreamInfo(key="zeta", description="z"),
+            StreamInfo(key="alpha", description="a"),
+            StreamInfo(key="mu", description=None),
+        ]
+    )
+
+    result = stream_service.list_streams(client)
+
+    assert [stream.key for stream in result] == ["alpha", "mu", "zeta"]
+
+
+def test_get_stream_schema_returns_schema_text() -> None:
+    client = StreamServiceStubClient(StubStream())
+
+    result = stream_service.get_stream_schema(client, "bars")
+
+    assert result.stream_key == "bars"
+    assert result.schema_text == "schema"
+
+
 def test_get_stream_time_range_returns_utc_datetimes() -> None:
-    client = StubClient(StubStream(time_range=[1_700_000_000_000, 1_700_000_060_000]))
+    client = StreamServiceStubClient(
+        StubStream(time_range=[1_700_000_000_000, 1_700_000_060_000])
+    )
 
     result = stream_service.get_stream_time_range(client, "bars")
 
@@ -122,7 +158,7 @@ def test_get_stream_time_range_returns_utc_datetimes() -> None:
 
 
 def test_get_stream_spaces_reports_unsupported_when_dxapi_returns_none() -> None:
-    client = StubClient(StubStream(spaces=None))
+    client = StreamServiceStubClient(StubStream(spaces=None))
 
     result = stream_service.get_stream_spaces(client, "bars")
 
@@ -133,7 +169,7 @@ def test_get_stream_spaces_reports_unsupported_when_dxapi_returns_none() -> None
 
 
 def test_get_stream_spaces_preserves_default_space_and_sorts() -> None:
-    client = StubClient(StubStream(spaces=["blue", "", "red"]))
+    client = StreamServiceStubClient(StubStream(spaces=["blue", "", "red"]))
 
     result = stream_service.get_stream_spaces(client, "bars")
 
@@ -143,7 +179,7 @@ def test_get_stream_spaces_preserves_default_space_and_sorts() -> None:
 
 
 def test_get_stream_space_time_range_returns_utc_datetimes() -> None:
-    client = StubClient(
+    client = StreamServiceStubClient(
         StubStream(
             space_time_ranges={
                 "blue": [1_700_000_000_000, 1_700_000_060_000],
@@ -160,7 +196,7 @@ def test_get_stream_space_time_range_returns_utc_datetimes() -> None:
 
 
 def test_get_stream_messages_text_passes_space_to_reader() -> None:
-    client = StubClient(StubStream(spaces=["blue"]))
+    client = StreamServiceStubClient(StubStream(spaces=["blue"]))
 
     text = stream_service.get_stream_messages_text(
         client, "bars", reverse=True, count=1, space="blue"
@@ -172,7 +208,7 @@ def test_get_stream_messages_text_passes_space_to_reader() -> None:
 
 
 def test_get_stream_symbols_sorts_and_pages() -> None:
-    client = StubClient(StubStream(symbols=["z", "a", "m"]))
+    client = StreamServiceStubClient(StubStream(symbols=["z", "a", "m"]))
 
     first = stream_service.get_stream_symbols(client, "bars", limit=1)
 
@@ -195,7 +231,7 @@ def test_get_stream_symbols_sorts_and_pages() -> None:
 
 
 def test_get_stream_symbols_rejects_non_positive_limit() -> None:
-    client = StubClient(StubStream(symbols=["a"]))
+    client = StreamServiceStubClient(StubStream(symbols=["a"]))
 
     with pytest.raises(ValueError, match="limit must be at least 1"):
         stream_service.get_stream_symbols(client, "bars", limit=0)
@@ -203,7 +239,7 @@ def test_get_stream_symbols_rejects_non_positive_limit() -> None:
 
 def test_get_stream_symbols_caps_page_size_at_500() -> None:
     symbols = [f"s{index:04d}" for index in range(600)]
-    client = StubClient(StubStream(symbols=symbols))
+    client = StreamServiceStubClient(StubStream(symbols=symbols))
 
     result = stream_service.get_stream_symbols(client, "bars", limit=1000)
 
@@ -213,7 +249,7 @@ def test_get_stream_symbols_caps_page_size_at_500() -> None:
 
 
 def test_get_stream_symbols_rejects_invalid_cursor() -> None:
-    client = StubClient(StubStream(symbols=["a", "b"]))
+    client = StreamServiceStubClient(StubStream(symbols=["a", "b"]))
 
     with pytest.raises(ValueError, match="Invalid cursor"):
         stream_service.get_stream_symbols(client, "bars", cursor="%%%")
@@ -225,7 +261,7 @@ def test_get_stream_symbols_rejects_invalid_cursor() -> None:
 
 def test_get_stream_symbols_reports_changed_symbol_set() -> None:
     stream = StubStream(symbols=["z", "a", "m"])
-    client = StubClient(stream)
+    client = StreamServiceStubClient(stream)
     first = stream_service.get_stream_symbols(client, "bars", limit=1)
     assert first.next_cursor is not None
 
