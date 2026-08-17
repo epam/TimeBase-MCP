@@ -1,4 +1,4 @@
-"""MCP server instructions exposed to clients on initialize."""
+"""MCP server instructions advertised via server/discover and result metadata."""
 
 SERVER_INSTRUCTIONS = """\
 TimeBase MCP connects to configured TimeBase instances. Use list_timebase_instances

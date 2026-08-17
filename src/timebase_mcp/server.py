@@ -8,11 +8,12 @@ from mcp.server.mcpserver import MCPServer
 
 from timebase_mcp.auth.inbound import build_inbound_auth
 from timebase_mcp.config.settings import MCPSettings
-from timebase_mcp.constants import APP_NAME
+from timebase_mcp.constants import APP_NAME, APP_WEBSITE_URL
 from timebase_mcp.instructions import SERVER_INSTRUCTIONS
 from timebase_mcp.resources import register_resources
 from timebase_mcp.runtime.state import TimeBaseRuntime, build_runtime
 from timebase_mcp.tools import register_tools
+from timebase_mcp.version import get_version
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,8 @@ def create_server(settings: MCPSettings) -> MCPServer[TimeBaseRuntime]:
 
     mcp = MCPServer(
         name=APP_NAME,
+        version=get_version(),
+        website_url=APP_WEBSITE_URL,
         instructions=SERVER_INSTRUCTIONS,
         log_level=settings.log_level,
         lifespan=lifespan,
