@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 from locust.clients import HttpSession
 
-JSON = "application/json"
-SSE = "text/event-stream"
-PROTOCOL_VERSION = "2025-06-18"
+from tests.support.mcp_http import (
+    build_client_meta,
+    build_modern_headers,
+    parse_jsonrpc_response,
+)
+
+
 _MAX_TOOL_ERROR_TEXT = 500
+_CLIENT_INFO_NAME = "timebase-mcp-stress"
+_CLIENT_INFO_VERSION = "0.1.0"
 
 
 class McpProtocolError(RuntimeError):
@@ -38,94 +43,54 @@ class StreamableHttpMcpClient:
         self._http = http
         self._path = path
         self._next_id = 1
-        self._session_id: str | None = None
-        self._protocol_version: str | None = None
 
-    def initialize(self) -> McpResponse:
-        payload = self._request(
-            "mcp:initialize",
-            {
-                "jsonrpc": "2.0",
-                "id": self._request_id(),
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": {
-                        "name": "timebase-mcp-locust",
-                        "version": "0.1.0",
-                    },
-                },
-            },
-            include_session=False,
+    def discover(self) -> McpResponse:
+        return self._request(
+            "mcp:discover",
+            method="server/discover",
+            params={},
         )
 
-        if payload.payload is None:
-            raise McpProtocolError("initialize returned no JSON-RPC payload")
-
-        result = payload.payload.get("result")
-        if isinstance(result, dict):
-            protocol_version = result.get("protocolVersion")
-            if isinstance(protocol_version, str):
-                self._protocol_version = protocol_version
-
-        self.notify("notifications/initialized", name="mcp:initialized")
-        return payload
-
     def close(self) -> None:
-        if self._session_id is None:
-            return
-        headers = self._headers(include_session=True)
-        with self._http.delete(
-            self._path,
-            headers=headers,
-            name="mcp:terminate",
-            catch_response=True,
-        ) as response:
-            if response.status_code in (200, 202, 204, 404):
-                response.success()
-            else:
-                response.failure(f"Unexpected terminate status: {response.status_code}")
-        self._session_id = None
+        # Sessionless modern transport has nothing to terminate.
+        return
 
     def call_tool(
         self, name: str, arguments: dict[str, Any] | None = None
     ) -> McpResponse:
         return self._request(
             f"tool:{name}",
-            {
-                "jsonrpc": "2.0",
-                "id": self._request_id(),
-                "method": "tools/call",
-                "params": {
-                    "name": name,
-                    "arguments": arguments or {},
-                },
+            method="tools/call",
+            params={
+                "name": name,
+                "arguments": arguments or {},
             },
-        )
-
-    def notify(
-        self, method: str, *, name: str, params: dict[str, Any] | None = None
-    ) -> None:
-        self._request(
-            name,
-            {
-                "jsonrpc": "2.0",
-                "method": method,
-                "params": params or {},
-            },
-            expect_response=False,
+            mcp_name=name,
         )
 
     def _request(
         self,
         name: str,
-        payload: dict[str, Any],
         *,
-        include_session: bool = True,
+        method: str,
+        params: dict[str, Any],
+        mcp_name: str | None = None,
         expect_response: bool = True,
     ) -> McpResponse:
-        headers = self._headers(include_session=include_session)
+        body_params = dict(params)
+        body_params["_meta"] = build_client_meta(
+            client_name=_CLIENT_INFO_NAME,
+            client_version=_CLIENT_INFO_VERSION,
+        )
+        payload: dict[str, Any] = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": body_params,
+        }
+        if expect_response:
+            payload["id"] = self._request_id()
+
+        headers = build_modern_headers(method=method, mcp_name=mcp_name)
         with self._http.post(
             self._path,
             json=payload,
@@ -141,12 +106,14 @@ class StreamableHttpMcpClient:
                 response.failure(f"HTTP {response.status_code}: {response.text[:500]}")
                 return McpResponse(payload=None, status_code=response.status_code)
 
-            session_id = response.headers.get("mcp-session-id")
-            if session_id:
-                self._session_id = session_id
+            if response.headers.get("mcp-session-id"):
+                response.failure(
+                    "Unexpected Mcp-Session-Id on 2026-07-28 sessionless response"
+                )
+                return McpResponse(payload=None, status_code=response.status_code)
 
             try:
-                message = self._parse_response(response)
+                message = parse_jsonrpc_response(response)
             except Exception as exc:
                 response.failure(str(exc))
                 return McpResponse(payload=None, status_code=response.status_code)
@@ -169,50 +136,17 @@ class StreamableHttpMcpClient:
 
         raise McpProtocolError("request completed without MCP response")
 
-    def _headers(self, *, include_session: bool) -> dict[str, str]:
-        headers = {
-            "accept": f"{JSON}, {SSE}",
-            "content-type": JSON,
-        }
-        if include_session and self._session_id:
-            headers["mcp-session-id"] = self._session_id
-        if self._protocol_version:
-            headers["mcp-protocol-version"] = self._protocol_version
-        return headers
-
-    def _parse_response(self, response) -> dict[str, Any] | None:
-        content_type = response.headers.get("content-type", "").lower()
-        if content_type.startswith(JSON):
-            return response.json()
-        if content_type.startswith(SSE):
-            return _first_sse_json_message(response.text)
-        if not response.text:
-            return None
-        raise McpProtocolError(f"Unexpected response content-type: {content_type!r}")
-
     def _request_id(self) -> int:
         request_id = self._next_id
         self._next_id += 1
         return request_id
 
 
-def _first_sse_json_message(text: str) -> dict[str, Any] | None:
-    for event in _iter_sse_events(text):
-        if event.get("event", "message") != "message":
-            continue
-        data = event.get("data")
-        if not data:
-            continue
-        value = json.loads(data)
-        if isinstance(value, dict):
-            return value
-        raise McpProtocolError("SSE message data is not a JSON object")
-    return None
-
-
 def _is_tool_error(message: dict[str, Any]) -> bool:
     result = message.get("result")
-    return isinstance(result, dict) and result.get("isError") is True
+    return isinstance(result, dict) and (
+        result.get("isError") is True or result.get("is_error") is True
+    )
 
 
 def _format_tool_error(message: dict[str, Any]) -> str:
@@ -239,6 +173,8 @@ def _format_tool_error(message: dict[str, Any]) -> str:
         return combined
 
     structured = result.get("structuredContent")
+    if structured is None:
+        structured = result.get("structured_content")
     if structured is not None:
         try:
             serialized = json.dumps(structured, ensure_ascii=False)
@@ -253,26 +189,3 @@ def _truncate(value: str) -> str:
     if len(value) > _MAX_TOOL_ERROR_TEXT:
         return value[: _MAX_TOOL_ERROR_TEXT - 3] + "..."
     return value
-
-
-def _iter_sse_events(text: str) -> Iterator[dict[str, str]]:
-    event: dict[str, list[str]] = {}
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip("\r")
-        if not line:
-            if event:
-                yield _join_sse_event(event)
-                event = {}
-            continue
-        if line.startswith(":"):
-            continue
-        field, _, value = line.partition(":")
-        if value.startswith(" "):
-            value = value[1:]
-        event.setdefault(field, []).append(value)
-    if event:
-        yield _join_sse_event(event)
-
-
-def _join_sse_event(event: dict[str, list[str]]) -> dict[str, str]:
-    return {key: "\n".join(values) for key, values in event.items()}

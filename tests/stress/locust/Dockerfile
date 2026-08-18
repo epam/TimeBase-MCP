@@ -18,9 +18,11 @@ FROM python:${PYTHON_VERSION}-slim-trixie AS runtime
 ARG PYTHON_VERSION
 
 ENV PATH=/opt/locust-venv/bin:$PATH \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/stress
 
 COPY --from=builder /opt/locust-venv /opt/locust-venv
+COPY tests/support/mcp_http.py /stress/tests/support/mcp_http.py
 COPY tests/stress/locust/locustfile.py tests/stress/locust/mcp_streamable_http.py /stress/
 
 WORKDIR /stress

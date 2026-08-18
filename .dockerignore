@@ -30,6 +30,8 @@ htmlcov/
 Thumbs.db
 
 tests/**
+!tests/support/
+!tests/support/mcp_http.py
 !tests/stress/
 tests/stress/**
 !tests/stress/locust/
