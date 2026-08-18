@@ -30,7 +30,7 @@ class TimeBaseMcpUser(HttpUser):
     @override
     def on_start(self) -> None:
         self.mcp = StreamableHttpMcpClient(self.client, path=MCP_PATH)
-        self.mcp.initialize()
+        self.mcp.discover()
 
     @override
     def on_stop(self) -> None:

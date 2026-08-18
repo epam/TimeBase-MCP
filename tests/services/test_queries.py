@@ -1,103 +1,35 @@
 from __future__ import annotations
 
-from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from typing_extensions import override
 
-from timebase_mcp.clients.base import TimeBaseClient
-from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
+from tests.stubs import StubTimeBaseClient, stub_instance
 from timebase_mcp.errors import ReadOnlyInstanceError, TimeBaseOperationCancelledError
-from timebase_mcp.models.core import StreamInfo
-from timebase_mcp.runtime.instance import (
-    TimeBaseInstanceConfig,
-    TimeBaseInstanceRuntime,
-)
 from timebase_mcp.services.qql_functions import normalize_qql_functions
-from timebase_mcp.services.queries import execute_query, list_qql_functions
+from timebase_mcp.services.queries import (
+    compile_query,
+    execute_query,
+    list_qql_functions,
+)
 
 
-class StubQueryClient(TimeBaseClient):
+class StubQueryClient(StubTimeBaseClient):
     def __init__(
         self,
         messages_by_query: dict[str, list[dict[str, Any]]] | None = None,
         *,
         read_only: bool = False,
         tokens: list[Any] | None = None,
+        compile_error: Exception | None = None,
     ) -> None:
-        super().__init__(
-            TimeBaseInstanceRuntime(
-                key=DEFAULT_INSTANCE_KEY,
-                config=TimeBaseInstanceConfig(
-                    tb_url="dxtick://localhost:8011",
-                    read_only=read_only,
-                ),
-            )
-        )
+        super().__init__(stub_instance(read_only=read_only))
         self.messages_by_query = messages_by_query or {}
         self.tokens = tokens or []
+        self.compile_error = compile_error
         self.executed_queries: list[str] = []
-
-    @override
-    def open(self) -> object:
-        return object()
-
-    @override
-    def close(self) -> None:
-        return None
-
-    @override
-    def require_db(self) -> object:
-        return object()
-
-    @override
-    def get_stream(self, stream_key: str) -> object:
-        raise NotImplementedError
-
-    @override
-    def get_stream_schema_text(self, stream: object) -> str:
-        raise NotImplementedError
-
-    @override
-    def list_stream_symbols(self, stream: object) -> list[str]:
-        raise NotImplementedError
-
-    @override
-    def list_stream_infos(self) -> list[StreamInfo]:
-        raise NotImplementedError
-
-    @override
-    def get_stream_time_range(
-        self,
-        stream_key: str,
-        stream: object,
-    ) -> tuple[datetime | None, datetime | None]:
-        raise NotImplementedError
-
-    @override
-    def list_stream_spaces(self, stream: object) -> list[str] | None:
-        raise NotImplementedError
-
-    @override
-    def get_stream_space_time_range(
-        self,
-        stream_key: str,
-        stream: object,
-        space: str,
-    ) -> tuple[datetime | None, datetime | None]:
-        raise NotImplementedError
-
-    @override
-    def read_stream_messages(
-        self,
-        stream: object,
-        reverse: bool,
-        count: int,
-        space: str | None,
-    ) -> list[dict[str, Any]]:
-        raise NotImplementedError
 
     @override
     def read_query_messages(self, query_text: str, limit: int) -> list[dict[str, Any]]:
@@ -106,6 +38,8 @@ class StubQueryClient(TimeBaseClient):
 
     @override
     def compile_query_tokens(self, query_text: str) -> list[Any]:
+        if self.compile_error is not None:
+            raise self.compile_error
         return self.tokens
 
 
@@ -481,3 +415,77 @@ def test_writable_instance_runs_queries_without_classifying() -> None:
     execute_query(client, query)
 
     assert client.executed_queries == [query]
+
+
+@pytest.mark.parametrize("query", ["", "   ", "\n\t"])
+def test_compile_query_rejects_empty_query(query: str) -> None:
+    with pytest.raises(ValueError, match="query must not be empty"):
+        compile_query(StubQueryClient(), query)
+
+
+def test_compile_query_returns_valid_result() -> None:
+    result = compile_query(StubQueryClient(tokens=[]), 'select * from "bars"')
+
+    assert result.valid is True
+    assert result.error is None
+    assert result.error_token is None
+    assert result.error_context is None
+    assert result.error_position is None
+
+
+def test_compile_query_shapes_range_diagnostic() -> None:
+    # Context window is 40 chars on each side of the error span.
+    query = (
+        "SELECT *\n"
+        "FROM bars\n"
+        "WHERE\n"
+        "  fields include\n"
+        '      "high" FLOAT\n'
+        '      "low" FLOAT and then enough trailing text to force an ellipsis\n'
+    )
+    client = StubQueryClient(
+        compile_error=RuntimeError("QQL compile error [at 6.7..12].")
+    )
+
+    result = compile_query(client, query)
+
+    assert result.valid is False
+    assert result.error == "QQL compile error [at 6.7..12]."
+    assert result.error_token == '"low"'
+    assert result.error_context == (
+        "...fields include\n"
+        '      "high" FLOAT\n'
+        '      "low" FLOAT and then enough trailing text to f...'
+    )
+    assert result.error_position is not None
+    assert result.error_position.start_line == 6
+    assert result.error_position.start_column == 7
+    assert result.error_position.end_line == 6
+    assert result.error_position.end_column == 12
+
+
+def test_compile_query_shapes_point_diagnostic() -> None:
+    query = "SELECT\nx"
+    client = StubQueryClient(compile_error=RuntimeError("syntax error [at 2:3]"))
+
+    result = compile_query(client, query)
+
+    assert result.valid is False
+    assert result.error == "syntax error [at 2:3]"
+    assert result.error_position is not None
+    assert result.error_position.start_line == 2
+    assert result.error_position.start_column == 3
+    assert result.error_position.end_line == 2
+    assert result.error_position.end_column == 3
+
+
+def test_compile_query_keeps_unparseable_error_text() -> None:
+    client = StubQueryClient(compile_error=RuntimeError("compiler exploded"))
+
+    result = compile_query(client, 'select * from "bars"')
+
+    assert result.valid is False
+    assert result.error == "compiler exploded"
+    assert result.error_token is None
+    assert result.error_context is None
+    assert result.error_position is None

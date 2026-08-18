@@ -17,11 +17,6 @@ from timebase_mcp.services.monitoring import (
 )
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
 def _runtime(http_base_url: str = "http://tb.example.com:8021") -> TimeBaseRuntime:
     runtime = build_runtime(MCPSettings(tb_http_url=http_base_url))
     runtime.default_instance.resolved_http_base_url = http_base_url
