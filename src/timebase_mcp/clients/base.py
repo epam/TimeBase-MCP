@@ -6,7 +6,8 @@ from contextlib import AbstractContextManager
 from datetime import datetime
 from types import TracebackType
 from typing import Any, Literal
-from typing_extensions import override
+
+from typing_extensions import Self, override
 
 from timebase_mcp.errors import TimeBaseOperationCancelledError
 from timebase_mcp.models.core import StreamInfo
@@ -30,7 +31,7 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
         self._rows_read: int = 0
 
     @override
-    def __enter__(self) -> "TimeBaseClient":
+    def __enter__(self) -> Self:
         self.open()
         return self
 

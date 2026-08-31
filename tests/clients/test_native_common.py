@@ -56,7 +56,7 @@ class _MessageWithVars:
         self.symbol = "MSFT"
 
     def getDateTime(self) -> datetime:
-        return datetime(2024, 2, 3, 4, 5, 6)
+        return datetime(2024, 2, 3, 4, 5, 6)  # noqa: DTZ001 - naive native timestamp under test
 
 
 def test_call_cursor_context_uses_native_context_manager() -> None:

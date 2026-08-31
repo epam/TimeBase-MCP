@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 import json
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib import error, parse, request
 
@@ -64,7 +64,9 @@ def parse_token_response(
     access_token_error: str,
 ) -> TokenResponse:
     if not isinstance(token_response, dict):
-        raise ValueError("OAuth2 token response must be a JSON object.")
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+            "OAuth2 token response must be a JSON object."
+        )
 
     access_token = token_response.get("access_token")
     if not isinstance(access_token, str) or not access_token:
@@ -104,7 +106,9 @@ def parse_expires_in(value: object) -> float | None:
                 "OAuth2 token response contains a non-numeric expires_in value."
             ) from exc
     else:
-        raise ValueError("OAuth2 token response contains an invalid expires_in value.")
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+            "OAuth2 token response contains an invalid expires_in value."
+        )
 
     if expires_in_seconds <= 0:
         raise ValueError(
@@ -187,7 +191,9 @@ def parse_json_token_response(response_body: str) -> dict[str, Any]:
         raise ValueError("OAuth2 token response was not valid JSON.") from exc
 
     if not isinstance(token_response, dict):
-        raise ValueError("OAuth2 token response must be a JSON object.")
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+            "OAuth2 token response must be a JSON object."
+        )
     return token_response
 
 

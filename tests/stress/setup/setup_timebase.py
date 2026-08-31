@@ -80,18 +80,19 @@ def seed_stream(
                 generate_bars(rows=rows, symbols=symbols), start=1
             ):
                 message = dxapi_ce.InstrumentMessage()
-                setattr(message, "typeName", BAR_MESSAGE_TYPE)
-                setattr(message, "instrumentType", BAR_INSTRUMENT_TYPE)
-                setattr(message, "symbol", bar.symbol)
-                setattr(message, "timestamp", to_epoch_nanos(bar.timestamp))
-                setattr(message, "originalTimestamp", 0)
-                setattr(message, "currencyCode", 999)
-                setattr(message, "exchangeId", EXCHANGE_ID)
-                setattr(message, "open", bar.open_price)
-                setattr(message, "close", bar.close_price)
-                setattr(message, "high", bar.high_price)
-                setattr(message, "low", bar.low_price)
-                setattr(message, "volume", bar.volume)
+                # dxapi_ce.InstrumentMessage attributes aren't in its type stubs.
+                setattr(message, "typeName", BAR_MESSAGE_TYPE)  # noqa: B010
+                setattr(message, "instrumentType", BAR_INSTRUMENT_TYPE)  # noqa: B010
+                setattr(message, "symbol", bar.symbol)  # noqa: B010
+                setattr(message, "timestamp", to_epoch_nanos(bar.timestamp))  # noqa: B010
+                setattr(message, "originalTimestamp", 0)  # noqa: B010
+                setattr(message, "currencyCode", 999)  # noqa: B010
+                setattr(message, "exchangeId", EXCHANGE_ID)  # noqa: B010
+                setattr(message, "open", bar.open_price)  # noqa: B010
+                setattr(message, "close", bar.close_price)  # noqa: B010
+                setattr(message, "high", bar.high_price)  # noqa: B010
+                setattr(message, "low", bar.low_price)  # noqa: B010
+                setattr(message, "volume", bar.volume)  # noqa: B010
                 loader.send(message)
                 if index % 1000 == 0:
                     print(f"Seeded {index} rows...")

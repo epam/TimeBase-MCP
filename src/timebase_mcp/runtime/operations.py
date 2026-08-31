@@ -137,10 +137,9 @@ async def run_with_runtime(
     except ValueError as exc:
         raise TimeBaseOperationError(str(exc)) from exc
     except Exception as exc:
-        logger.error(
+        logger.exception(
             "Unexpected error during TimeBase operation for instance %s",
             instance.key,
-            exc_info=True,
         )
         raise TimeBaseOperationError(str(exc)) from exc
     finally:

@@ -8,17 +8,16 @@ from mcp.client import Client
 from mcp.shared.exceptions import MCPError
 from mcp_types import TextResourceContents
 
+from tests.server.helpers import (
+    ResourceCatalogClient,
+    resource_text,
+)
 from timebase_mcp import resources as resources_module
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import (
     TimeBaseOperationError,
 )
 from timebase_mcp.server import create_server
-
-from tests.server.helpers import (
-    ResourceCatalogClient,
-    resource_text,
-)
 
 
 @pytest.mark.anyio

@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from types import TracebackType
 from typing import Any, Literal
+
 from typing_extensions import override
 
 from timebase_mcp.config.types import Edition

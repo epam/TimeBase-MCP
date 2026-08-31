@@ -8,6 +8,9 @@ from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 
+from tests.auth.helpers import (
+    make_rsa_verifier,
+)
 from timebase_mcp.auth import keystore
 from timebase_mcp.auth.keystore import KeyStore
 from timebase_mcp.auth.principal import current_principal
@@ -18,10 +21,6 @@ from timebase_mcp.auth.token_verifier import (
 )
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
-
-from tests.auth.helpers import (
-    make_rsa_verifier,
-)
 
 
 def test_required_scopes_normalization(monkeypatch: pytest.MonkeyPatch) -> None:

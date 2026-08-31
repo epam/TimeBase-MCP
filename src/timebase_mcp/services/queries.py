@@ -93,7 +93,7 @@ def compile_query(client: TimeBaseClient, query: str) -> CompileQQLResult:
 
     try:
         client.compile_query_tokens(query_text)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - native compile errors surfaced as a result
         error_text = str(exc)
         error_position = _parse_compile_error_position(error_text)
         error_token, error_context = _extract_error_details(query_text, error_position)
@@ -230,8 +230,7 @@ def _extract_error_details(
     if start_offset is None or end_offset is None:
         return None, None
 
-    if end_offset < start_offset:
-        end_offset = start_offset
+    end_offset = max(end_offset, start_offset)
 
     error_token_value = query_text[start_offset:end_offset].strip()
     error_token = error_token_value or None

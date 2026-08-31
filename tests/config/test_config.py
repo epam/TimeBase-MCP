@@ -5,13 +5,13 @@ from pydantic import SecretStr, ValidationError
 
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
-from timebase_mcp.runtime.state import build_runtime
 from timebase_mcp.constants import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     DEFAULT_TIMEBASE_URL,
     DEFAULT_TRANSPORT,
 )
+from timebase_mcp.runtime.state import build_runtime
 
 
 def test_settings_use_defaults_when_environment_is_not_set() -> None:

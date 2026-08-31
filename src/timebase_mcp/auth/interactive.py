@@ -10,11 +10,11 @@ import time
 import webbrowser
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing_extensions import override
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx2
+from typing_extensions import override
 
 from timebase_mcp.auth.discovery import (
     InteractiveEndpoints,
@@ -368,7 +368,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
 
 
 def build_interactive_provider(
-    instance: "TimeBaseInstanceRuntime",
+    instance: TimeBaseInstanceRuntime,
     *,
     redirect_uri: str | None = None,
 ) -> OAuth2AccessTokenProvider:

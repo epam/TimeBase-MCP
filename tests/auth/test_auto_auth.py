@@ -4,6 +4,11 @@ import os
 
 import pytest
 
+from tests.auth.helpers import (
+    advertise_oauth,
+    forward_identity_settings,
+    patch_auto_client_creation,
+)
 from timebase_mcp.clients.factory import create_timebase_client
 from timebase_mcp.clients.native.common import connection_error_hint
 from timebase_mcp.config.env import DXAPI_SSL_TERMINATION_ENV, SettingsEnv
@@ -14,12 +19,6 @@ from timebase_mcp.runtime.instance import (
     TimeBaseInstanceRuntime,
 )
 from timebase_mcp.runtime.state import build_runtime
-
-from tests.auth.helpers import (
-    forward_identity_settings,
-    patch_auto_client_creation,
-    advertise_oauth,
-)
 
 
 def test_auto_auth_switches_to_interactive_and_sets_ssl_termination(

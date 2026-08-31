@@ -19,7 +19,7 @@ def normalize_oauth2_scope(value: object) -> str | None:
         normalized_scopes: list[str] = []
         for item in value:
             if not isinstance(item, str):
-                raise ValueError(
+                raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
                     "TIMEBASE_OAUTH2_SCOPE must be a string or a list of strings."
                 )
             normalized_scopes.extend(part for part in item.split() if part)
@@ -42,14 +42,14 @@ def normalize_oauth2_token_params(value: object) -> object:
             ) from exc
 
     if not isinstance(value, dict):
-        raise ValueError(
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
             "TIMEBASE_OAUTH2_TOKEN_PARAMS must be a JSON object with string keys and values."
         )
 
     normalized_params: dict[str, str] = {}
     for key, item in value.items():
         if not isinstance(key, str) or not isinstance(item, str):
-            raise ValueError(
+            raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
                 "TIMEBASE_OAUTH2_TOKEN_PARAMS must be a JSON object with string keys and values."
             )
         normalized_params[key] = item
@@ -83,7 +83,7 @@ def normalize_string_list(value: object, *, error_message: str) -> list[str] | N
         tokens: list[str] = []
         for item in value:
             if not isinstance(item, str):
-                raise ValueError(error_message)
+                raise ValueError(error_message)  # noqa: TRY004 - malformed data, not a type contract
             tokens.extend(_split_tokens(item))
         return tokens or None
 

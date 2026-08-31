@@ -4,6 +4,7 @@ from email.message import Message
 from urllib import error, parse
 
 import pytest
+from typing_extensions import Self
 
 from timebase_mcp.auth.oauth2 import (
     OAuth2ClientCredentialsConfig,
@@ -22,7 +23,7 @@ class DummyResponse:
     def read(self) -> bytes:
         return self._payload
 
-    def __enter__(self) -> "DummyResponse":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
@@ -36,7 +37,7 @@ class RawResponse:
     def read(self) -> bytes:
         return self._payload
 
-    def __enter__(self) -> "RawResponse":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:

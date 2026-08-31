@@ -79,7 +79,9 @@ def build_record(*, name: str, scopes: Sequence[str]) -> tuple[ApiKeyRecord, str
 
 def _parse_record(entry: Any) -> ApiKeyRecord:
     if not isinstance(entry, dict):
-        raise ValueError("Each API key entry must be a JSON object.")
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+            "Each API key entry must be a JSON object."
+        )
 
     id_ = entry.get("id")
     name = entry.get("name")
@@ -112,7 +114,9 @@ def _parse_record(entry: Any) -> ApiKeyRecord:
 def parse_store(data: Any) -> tuple[ApiKeyRecord, ...]:
     """Validate and parse the in-memory representation of a key store."""
     if not isinstance(data, dict):
-        raise ValueError("API key store must be a JSON object.")
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+            "API key store must be a JSON object."
+        )
 
     version = data.get("version")
     if version != _STORE_VERSION:
@@ -122,7 +126,9 @@ def parse_store(data: Any) -> tuple[ApiKeyRecord, ...]:
 
     keys = data.get("keys")
     if not isinstance(keys, list):
-        raise ValueError("API key store 'keys' must be a list.")
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+            "API key store 'keys' must be a list."
+        )
 
     records = tuple(_parse_record(entry) for entry in keys)
     ids = [record.id for record in records]

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing_extensions import override
 from typing import TYPE_CHECKING, Any, cast
+
+from typing_extensions import override
 
 from timebase_mcp.auth.outbound import resolve_timebase_credentials
 from timebase_mcp.clients.base import TimeBaseClient
@@ -13,12 +14,12 @@ from timebase_mcp.clients.native.common import (
     normalize_message,
     parse_time_range_ms,
 )
+from timebase_mcp.constants import APP_NAME
 from timebase_mcp.errors import (
     ConfigurationError,
     StreamNotFoundError,
     TimeBaseConnectionError,
 )
-from timebase_mcp.constants import APP_NAME
 from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 
 try:
     import dxapi
-except Exception as exc:
+except Exception as exc:  # noqa: BLE001 - optional native dependency
     dxapi = None
     _DXAPI_IMPORT_ERROR = exc
 else:

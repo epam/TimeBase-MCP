@@ -189,7 +189,7 @@ def build_http_auth_headers(
     assert credentials.username is not None
     assert credentials.password is not None
     token = base64.b64encode(
-        f"{credentials.username}:{credentials.password}".encode("utf-8")
+        f"{credentials.username}:{credentials.password}".encode()
     ).decode("ascii")
     return {"Authorization": "Basic " + token}
 

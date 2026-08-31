@@ -48,8 +48,7 @@ def _iter_qql_function_payloads(messages: list[dict[str, Any]]) -> list[dict[str
     payloads: list[dict[str, Any]] = []
     for message in messages:
         wrapped_functions = _first_present(message, QQL_FUNCTIONS_FIELD)
-        for function_payload in _coerce_dict_list(wrapped_functions):
-            payloads.append(function_payload)
+        payloads.extend(_coerce_dict_list(wrapped_functions))
 
     return payloads
 

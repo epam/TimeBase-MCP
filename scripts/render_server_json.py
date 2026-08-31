@@ -143,11 +143,11 @@ def apply_environment_variables(data: dict[str, Any]) -> None:
         transport = package.get("transport")
         if not isinstance(transport, dict):
             msg = "package is missing transport"
-            raise ValueError(msg)
+            raise ValueError(msg)  # noqa: TRY004 - malformed data, not a type contract
         transport_type = transport.get("type")
         if not isinstance(transport_type, str):
             msg = "package transport is missing type"
-            raise ValueError(msg)
+            raise ValueError(msg)  # noqa: TRY004 - malformed data, not a type contract
         package["environmentVariables"] = environment_variables_for_transport(
             transport_type
         )

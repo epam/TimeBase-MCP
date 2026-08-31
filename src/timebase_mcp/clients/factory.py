@@ -10,12 +10,12 @@ from packaging.utils import canonicalize_name
 
 from timebase_mcp.auth.outbound import resolve_auto_auth_config
 from timebase_mcp.clients.base import TimeBaseClient
+from timebase_mcp.config.types import Edition
 from timebase_mcp.errors import ConfigurationError, TimeBaseConnectionError
 from timebase_mcp.runtime.instance import (
     TimeBaseInstanceConfig,
     TimeBaseInstanceRuntime,
 )
-from timebase_mcp.config.types import Edition
 
 logger = logging.getLogger(__name__)
 

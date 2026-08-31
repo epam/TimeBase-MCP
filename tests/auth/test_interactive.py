@@ -4,6 +4,9 @@ import json
 
 import pytest
 
+from tests.auth.helpers import (
+    interactive_provider,
+)
 from timebase_mcp.auth.discovery import (
     InteractiveEndpoints,
 )
@@ -14,10 +17,6 @@ from timebase_mcp.auth.interactive import (
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import ConfigurationError
-
-from tests.auth.helpers import (
-    interactive_provider,
-)
 
 
 def test_resolve_interactive_redirect_uri_defaults_to_mcp_host_port() -> None:

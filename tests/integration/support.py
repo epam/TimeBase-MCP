@@ -149,18 +149,18 @@ def seed_bars_stream(
         try:
             for bar in SEEDED_BARS:
                 message = module.InstrumentMessage()
-                setattr(message, "typeName", BAR_MESSAGE_TYPE)
-                setattr(message, "instrumentType", BAR_INSTRUMENT_TYPE)
-                setattr(message, "symbol", bar.symbol)
-                setattr(message, "timestamp", _to_epoch_nanos(bar.timestamp))
-                setattr(message, "originalTimestamp", 0)
-                setattr(message, "currencyCode", 999)
-                setattr(message, "exchangeId", EXCHANGE_ID)
-                setattr(message, "open", bar.open_price)
-                setattr(message, "close", bar.close_price)
-                setattr(message, "high", bar.high_price)
-                setattr(message, "low", bar.low_price)
-                setattr(message, "volume", bar.volume)
+                message.typeName = BAR_MESSAGE_TYPE
+                message.instrumentType = BAR_INSTRUMENT_TYPE
+                message.symbol = bar.symbol
+                message.timestamp = _to_epoch_nanos(bar.timestamp)
+                message.originalTimestamp = 0
+                message.currencyCode = 999
+                message.exchangeId = EXCHANGE_ID
+                message.open = bar.open_price
+                message.close = bar.close_price
+                message.high = bar.high_price
+                message.low = bar.low_price
+                message.volume = bar.volume
                 loader.send(message)
         finally:
             loader.close()

@@ -28,7 +28,8 @@ def test_format_messages_preview_numbers_sorted_json_lines() -> None:
 
 
 def test_json_default_naive_datetime_becomes_utc_iso() -> None:
-    assert json_default(datetime(2024, 1, 2, 3, 4, 5)) == "2024-01-02T03:04:05+00:00"
+    naive = datetime(2024, 1, 2, 3, 4, 5)  # noqa: DTZ001 - naive datetime is the case under test
+    assert json_default(naive) == "2024-01-02T03:04:05+00:00"
 
 
 def test_json_default_aware_datetime_converted_to_utc() -> None:

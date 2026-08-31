@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 import httpx2
 
-from timebase_mcp.errors import ConfigurationError
 from timebase_mcp.clients.http.transport import (
     HTTP_DISCOVERY_TIMEOUT_SECONDS,
-    tls_verify,
     timebase_http_request,
+    tls_verify,
 )
+from timebase_mcp.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime

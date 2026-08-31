@@ -7,14 +7,13 @@ import pytest
 from mcp.client import Client
 from mcp_types import TextContent
 
+from tests.server.helpers import (
+    SpaceToolClient,
+)
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.server import create_server
 from timebase_mcp.tools import streams as stream_tools
-
-from tests.server.helpers import (
-    SpaceToolClient,
-)
 
 
 @pytest.mark.anyio
@@ -33,7 +32,7 @@ async def test_call_stream_tool_uses_selected_instance(
         selected_instances.append(instance_key)
         return [StreamInfo(key="bars", description=f"from {instance_key}")]
 
-    monkeypatch.setattr(stream_tools, "run_with_context", run_list_streams)
+    monkeypatch.setattr(stream_tools, "run_tool_operation", run_list_streams)
     settings = MCPSettings.model_validate(
         {
             "servers": [
@@ -72,7 +71,7 @@ async def test_call_stream_tool_uses_single_instance_when_key_is_omitted(
         selected_instances.append(instance_key)
         return []
 
-    monkeypatch.setattr(stream_tools, "run_with_context", run_list_streams)
+    monkeypatch.setattr(stream_tools, "run_tool_operation", run_list_streams)
 
     async with client_session_factory(None) as client_session:
         result = await client_session.call_tool("list_streams", {})
@@ -98,7 +97,7 @@ async def test_call_stream_space_tools_pass_arguments(
         selected_instances.append(instance_key)
         return operation(SpaceToolClient(calls))
 
-    monkeypatch.setattr(stream_tools, "run_with_context", run_stream_operation)
+    monkeypatch.setattr(stream_tools, "run_tool_operation", run_stream_operation)
 
     async with client_session_factory(None) as client_session:
         spaces_result = await client_session.call_tool(
@@ -165,7 +164,9 @@ async def test_call_stream_tool_requires_instance_key_when_multiple_instances() 
     assert result.is_error is True
     assert result.structured_content is None
     assert text_content == [
-        "Error executing tool list_streams: "
-        "instance_key is required when multiple TimeBase instances are configured. "
-        "Call list_timebase_instances to choose an instance."
+        (
+            "Error executing tool list_streams: "
+            "instance_key is required when multiple TimeBase instances are configured. "
+            "Call list_timebase_instances to choose an instance."
+        )
     ]
