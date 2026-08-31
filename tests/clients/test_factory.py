@@ -350,7 +350,7 @@ def test_create_timebase_client_does_not_fallback_on_generic_connection_error(
         ),
         pytest.param(None, ("community",), "community", id="single-installed"),
         pytest.param(None, ("enterprise", "community"), None, id="unresolved"),
-        pytest.param(None, tuple(), None, id="none-installed"),
+        pytest.param(None, (), None, id="none-installed"),
     ],
 )
 def test_get_detected_edition(

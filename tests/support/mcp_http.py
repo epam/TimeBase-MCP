@@ -74,7 +74,9 @@ def parse_jsonrpc_response(response: _ResponseLike) -> dict[str, Any] | None:
         raise ValueError(f"Unexpected response content-type: {content_type!r}")
 
     if not isinstance(payload, dict):
-        raise ValueError("MCP response payload is not a JSON object")
+        raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+            "MCP response payload is not a JSON object"
+        )
     return payload
 
 
@@ -93,7 +95,9 @@ def first_sse_json_message(text: str) -> dict[str, Any] | None:
             continue
         value = json.loads(data)
         if not isinstance(value, dict):
-            raise ValueError("SSE message data is not a JSON object")
+            raise ValueError(  # noqa: TRY004 - malformed data, not a type contract
+                "SSE message data is not a JSON object"
+            )
         if "result" in value or "error" in value:
             return value
         if fallback is None:
@@ -113,8 +117,7 @@ def iter_sse_events(text: str) -> Iterator[dict[str, str]]:
         if line.startswith(":"):
             continue
         field, _, value = line.partition(":")
-        if value.startswith(" "):
-            value = value[1:]
+        value = value.removeprefix(" ")
         event.setdefault(field, []).append(value)
     if event:
         yield {key: "\n".join(values) for key, values in event.items()}

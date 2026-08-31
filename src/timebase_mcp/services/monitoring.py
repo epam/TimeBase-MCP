@@ -8,8 +8,13 @@ from urllib.parse import urlencode
 
 import httpx2
 
+from timebase_mcp.clients.http.responses import (
+    response_json_dict,
+    response_json_list,
+)
+from timebase_mcp.clients.http.transport import timebase_http_request
+from timebase_mcp.clients.http.urls import quote_path_segment
 from timebase_mcp.errors import TimeBaseOperationError, TimeBaseOperationTimeoutError
-from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 from timebase_mcp.models.monitoring import (
     TimeBaseActivityDetail,
     TimeBaseActivityList,
@@ -22,13 +27,8 @@ from timebase_mcp.models.monitoring import (
     TimeBaseSecuritySummary,
     TimeBaseStatus,
 )
+from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 from timebase_mcp.runtime.state import TimeBaseRuntime
-from timebase_mcp.clients.http.responses import (
-    response_json_dict,
-    response_json_list,
-)
-from timebase_mcp.clients.http.transport import timebase_http_request
-from timebase_mcp.clients.http.urls import quote_path_segment
 
 ResultT = TypeVar("ResultT")
 ActivityKind = Literal["all", "cursors", "loaders", "connections", "locks"]
@@ -113,7 +113,7 @@ def _optional_dict(
 ) -> dict[str, Any] | None:
     try:
         return _required_dict(instance, endpoint)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - reported as a non-fatal warning
         warnings.append(f"{endpoint} unavailable: {exc}")
         return None
 
@@ -292,7 +292,7 @@ def _optional_list(
             what=endpoint,
             error_factory=TimeBaseOperationError,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - reported as a non-fatal warning
         warnings.append(f"{endpoint} unavailable: {exc}")
         return []
 

@@ -6,12 +6,11 @@ import pytest
 from mcp.client import Client
 
 import timebase_mcp.runtime.operations as operations_module
-from timebase_mcp.config.settings import MCPSettings
-from timebase_mcp.server import create_server
-
 from tests.server.helpers import (
     QueryStubClient,
 )
+from timebase_mcp.config.settings import MCPSettings
+from timebase_mcp.server import create_server
 
 
 @pytest.mark.anyio

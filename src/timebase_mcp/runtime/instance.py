@@ -140,7 +140,7 @@ class _ForwardedIdentity:
 
 @dataclass(slots=True)
 class _PrincipalPool:
-    pool: TimeBaseConnectionPool["TimeBaseClient"]
+    pool: TimeBaseConnectionPool[TimeBaseClient]
     last_used_monotonic: float
     identity: _ForwardedIdentity | None = None
 
@@ -194,14 +194,14 @@ class TimeBaseInstanceRuntime:
     )
 
     @property
-    def connection_pool(self) -> TimeBaseConnectionPool["TimeBaseClient"] | None:
+    def connection_pool(self) -> TimeBaseConnectionPool[TimeBaseClient] | None:
         entry = self._principal_pools.get(SHARED_PRINCIPAL_KEY)
         return entry.pool if entry is not None else None
 
     def clear_http_base_url(self) -> None:
         self.resolved_http_base_url = None
 
-    def get_connection_pool(self) -> TimeBaseConnectionPool["TimeBaseClient"]:
+    def get_connection_pool(self) -> TimeBaseConnectionPool[TimeBaseClient]:
         """Return the shared, process-identity connection pool."""
         entry = self._principal_pools.get(SHARED_PRINCIPAL_KEY)
         if entry is not None:
@@ -224,7 +224,7 @@ class TimeBaseInstanceRuntime:
         principal_key: str,
         access_token: str,
         access_username: str | None,
-    ) -> TimeBaseConnectionPool["TimeBaseClient"]:
+    ) -> TimeBaseConnectionPool[TimeBaseClient]:
         """Return (creating if needed) a per-principal pool for forward_identity."""
         now = time.monotonic()
         entry = self._principal_pools.get(principal_key)
@@ -257,13 +257,13 @@ class TimeBaseInstanceRuntime:
         self._evict_principal_pools(now)
         return pool
 
-    def open_client(self) -> "TimeBaseClient":
+    def open_client(self) -> TimeBaseClient:
         from timebase_mcp.clients.factory import create_timebase_client
 
         return create_timebase_client(self)
 
     def _make_forwarded_creator(self, identity: _ForwardedIdentity):
-        def create() -> "TimeBaseClient":
+        def create() -> TimeBaseClient:
             from timebase_mcp.clients.factory import create_timebase_client
 
             forwarded = dataclasses.replace(
@@ -319,7 +319,7 @@ class TimeBaseInstanceRuntime:
 
     def _schedule_close(
         self,
-        pool: TimeBaseConnectionPool["TimeBaseClient"],
+        pool: TimeBaseConnectionPool[TimeBaseClient],
     ) -> None:
         try:
             loop = asyncio.get_running_loop()

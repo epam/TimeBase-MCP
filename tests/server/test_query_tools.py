@@ -159,7 +159,10 @@ async def test_call_execute_query_tool_surfaces_operation_errors_to_client(
     ):
         raise error_type(message)
 
-    monkeypatch.setattr(query_tools, "run_tool_operation", fail_operation)
+    monkeypatch.setattr(
+        "timebase_mcp.tools.common.run_with_context",
+        fail_operation,
+    )
 
     server = create_server(MCPSettings())
     async with Client(server, raise_exceptions=False) as client_session:

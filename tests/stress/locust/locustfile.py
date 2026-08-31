@@ -3,9 +3,8 @@ from __future__ import annotations
 import os
 
 from locust import HttpUser, between, task
-from typing_extensions import override
-
 from mcp_streamable_http import StreamableHttpMcpClient
+from typing_extensions import override
 
 
 def _float_env(name: str, default: float) -> float:

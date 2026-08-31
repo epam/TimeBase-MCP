@@ -304,7 +304,7 @@ async def test_get_timebase_status_warns_when_license_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_request(method: str, url: str, *, timeout: float, verify: bool, **kwargs):
-        if url.endswith("/tb/api/license") or url.endswith("/tb/api/server/security"):
+        if url.endswith(("/tb/api/license", "/tb/api/server/security")):
             return httpx2.Response(
                 500, request=httpx2.Request(method, url), json={"message": "boom"}
             )

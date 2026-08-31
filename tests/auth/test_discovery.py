@@ -5,6 +5,11 @@ import logging
 import httpx2
 import pytest
 
+from tests.auth.helpers import (
+    DiscoveryResponse,
+    http_instance,
+    timebase_oauthinfo_payload,
+)
 from timebase_mcp.auth.discovery import (
     fetch_oauthinfo,
     resolve_interactive_endpoints,
@@ -12,12 +17,6 @@ from timebase_mcp.auth.discovery import (
 from timebase_mcp.clients.http.transport import timebase_http_request
 from timebase_mcp.config.env import DXAPI_SSL_TERMINATION_ENV
 from timebase_mcp.errors import ConfigurationError
-
-from tests.auth.helpers import (
-    DiscoveryResponse,
-    timebase_oauthinfo_payload,
-    http_instance,
-)
 
 
 def test_fetch_oauthinfo_parses_timebase_application_metadata(

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing_extensions import override
 from typing import TYPE_CHECKING, Any, cast
+
+from typing_extensions import override
 
 from timebase_mcp.auth.outbound import resolve_timebase_credentials
 from timebase_mcp.clients.base import TimeBaseClient
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 try:
     import dxapi_ce
-except Exception as exc:
+except Exception as exc:  # noqa: BLE001 - optional native dependency
     dxapi_ce = None
     _DXAPI_CE_IMPORT_ERROR = exc
 else:

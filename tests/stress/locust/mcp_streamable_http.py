@@ -12,7 +12,6 @@ from tests.support.mcp_http import (
     parse_jsonrpc_response,
 )
 
-
 _MAX_TOOL_ERROR_TEXT = 500
 _CLIENT_INFO_NAME = "timebase-mcp-stress"
 _CLIENT_INFO_VERSION = "0.1.0"
@@ -114,7 +113,7 @@ class StreamableHttpMcpClient:
 
             try:
                 message = parse_jsonrpc_response(response)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - reported as a locust failure
                 response.failure(str(exc))
                 return McpResponse(payload=None, status_code=response.status_code)
 

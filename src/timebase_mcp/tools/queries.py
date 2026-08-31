@@ -91,7 +91,7 @@ def register_query_tools(mcp: MCPServer) -> None:
             default="all",
             description="Function category to return",
         ),
-        function_id: QQLFunctionId = Field(
+        function_id: QQLFunctionId = Field(  # noqa: B008 - FastMCP reads defaults at decoration time
             default=None,
             description=(
                 "Optional exact QQL function id to return, e.g. ABS or SMA. "

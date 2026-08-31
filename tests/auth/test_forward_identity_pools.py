@@ -5,14 +5,13 @@ from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 
+from tests.auth.helpers import (
+    forward_identity_settings,
+)
 from tests.stubs import StubPooledClient
 from timebase_mcp.errors import TimeBaseOperationStateError
 from timebase_mcp.runtime.operations import run_with_runtime
 from timebase_mcp.runtime.state import build_runtime
-
-from tests.auth.helpers import (
-    forward_identity_settings,
-)
 
 
 @pytest.mark.anyio

@@ -242,7 +242,7 @@ class TimeBaseConnectionPool(Generic[ClientT]):
     ) -> None:
         try:
             client = await create_future
-        except Exception:
+        except Exception:  # noqa: BLE001 - creation failure already reported elsewhere
             return
 
         await asyncio.to_thread(client.close)
@@ -256,8 +256,7 @@ class TimeBaseConnectionPool(Generic[ClientT]):
         except asyncio.CancelledError:
             return
         except Exception:
-            logger.error(
+            logger.exception(
                 "Background cleanup failed for TimeBase pool instance %s",
                 self.instance_key,
-                exc_info=True,
             )

@@ -7,14 +7,13 @@ import pytest
 from mcp.client import Client
 from mcp_types import TextContent
 
+from tests.server.helpers import (
+    SpaceToolClient,
+)
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.server import create_server
 from timebase_mcp.tools import streams as stream_tools
-
-from tests.server.helpers import (
-    SpaceToolClient,
-)
 
 
 @pytest.mark.anyio
@@ -165,7 +164,9 @@ async def test_call_stream_tool_requires_instance_key_when_multiple_instances() 
     assert result.is_error is True
     assert result.structured_content is None
     assert text_content == [
-        "Error executing tool list_streams: "
-        "instance_key is required when multiple TimeBase instances are configured. "
-        "Call list_timebase_instances to choose an instance."
+        (
+            "Error executing tool list_streams: "
+            "instance_key is required when multiple TimeBase instances are configured. "
+            "Call list_timebase_instances to choose an instance."
+        )
     ]

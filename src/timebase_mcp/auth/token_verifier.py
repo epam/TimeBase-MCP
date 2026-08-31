@@ -4,11 +4,11 @@ import asyncio
 import hmac
 import logging
 from collections.abc import Iterable, Sequence
-from typing_extensions import override
 from typing import Any
 
 import jwt
 from mcp.server.auth.provider import AccessToken, TokenVerifier
+from typing_extensions import override
 
 from timebase_mcp.auth.keystore import ApiKeyRecord, KeyStore, hash_key
 

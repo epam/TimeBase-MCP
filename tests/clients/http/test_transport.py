@@ -15,9 +15,9 @@ from timebase_mcp.clients.http.transport import (
 )
 from timebase_mcp.clients.http.urls import (
     build_tb_url,
-    quote_path_segment,
     derive_http_base_urls,
     http_base_url_candidates,
+    quote_path_segment,
 )
 from timebase_mcp.runtime.instance import (
     TimeBaseInstanceConfig,

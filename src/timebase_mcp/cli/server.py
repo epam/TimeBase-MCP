@@ -36,8 +36,8 @@ def load_settings() -> MCPSettings:
             raw_settings = json.dumps(
                 MCPSettings.debug_log_payload_from_env(), sort_keys=True
             )
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to render raw settings for error logging.")
 
         logger.error(
             "Invalid TimeBase MCP configuration: %s. Raw settings: %s",
@@ -99,8 +99,8 @@ def run_server() -> int:
         active_server = build_server(active_settings)
     except ConfigurationError:
         return 1
-    except Exception as exc:
-        logger.error("Failed to start TimeBase MCP server: %s", exc)
+    except Exception:
+        logger.exception("Failed to start TimeBase MCP server.")
         return 1
 
     try:
@@ -121,8 +121,8 @@ def run_server() -> int:
         if active_settings.transport == "stdio" and should_log_terminal_status():
             logger.info("TimeBase MCP server stopped.")
         return 130
-    except Exception as exc:
-        logger.error("TimeBase MCP server failed: %s", exc)
+    except Exception:
+        logger.exception("TimeBase MCP server failed.")
         return 1
 
     return 0
