@@ -33,7 +33,7 @@ async def test_call_stream_tool_uses_selected_instance(
         selected_instances.append(instance_key)
         return [StreamInfo(key="bars", description=f"from {instance_key}")]
 
-    monkeypatch.setattr(stream_tools, "run_with_context", run_list_streams)
+    monkeypatch.setattr(stream_tools, "run_tool_operation", run_list_streams)
     settings = MCPSettings.model_validate(
         {
             "servers": [
@@ -72,7 +72,7 @@ async def test_call_stream_tool_uses_single_instance_when_key_is_omitted(
         selected_instances.append(instance_key)
         return []
 
-    monkeypatch.setattr(stream_tools, "run_with_context", run_list_streams)
+    monkeypatch.setattr(stream_tools, "run_tool_operation", run_list_streams)
 
     async with client_session_factory(None) as client_session:
         result = await client_session.call_tool("list_streams", {})
@@ -98,7 +98,7 @@ async def test_call_stream_space_tools_pass_arguments(
         selected_instances.append(instance_key)
         return operation(SpaceToolClient(calls))
 
-    monkeypatch.setattr(stream_tools, "run_with_context", run_stream_operation)
+    monkeypatch.setattr(stream_tools, "run_tool_operation", run_stream_operation)
 
     async with client_session_factory(None) as client_session:
         spaces_result = await client_session.call_tool(

@@ -38,7 +38,7 @@ async def test_call_compile_query_tool_returns_compact_success_payload(
 
     monkeypatch.setattr(
         query_tools,
-        "run_with_context",
+        "run_tool_operation",
         run_compile_query,
     )
 
@@ -96,7 +96,7 @@ async def test_call_list_qql_functions_tool_returns_structured_payload(
 
     monkeypatch.setattr(
         query_tools,
-        "run_with_context",
+        "run_tool_operation",
         run_list_qql_functions,
     )
     monkeypatch.setattr(
@@ -159,7 +159,7 @@ async def test_call_execute_query_tool_surfaces_operation_errors_to_client(
     ):
         raise error_type(message)
 
-    monkeypatch.setattr(query_tools, "run_with_context", fail_operation)
+    monkeypatch.setattr(query_tools, "run_tool_operation", fail_operation)
 
     server = create_server(MCPSettings())
     async with Client(server, raise_exceptions=False) as client_session:
@@ -203,7 +203,7 @@ async def test_call_compile_query_tool_returns_structured_error_payload(
 
     monkeypatch.setattr(
         query_tools,
-        "run_with_context",
+        "run_tool_operation",
         run_compile_query,
     )
 

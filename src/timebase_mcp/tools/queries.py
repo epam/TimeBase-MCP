@@ -5,12 +5,10 @@ from mcp_types import ToolAnnotations
 from pydantic import AfterValidator, Field
 
 from timebase_mcp.models.core import CompileQQLResult, QQLFunctionsResult
-from timebase_mcp.runtime.operations import run_with_context
+from timebase_mcp.runtime.state import TimeBaseRuntime
 from timebase_mcp.services import queries as query_service
 from timebase_mcp.services.queries import validate_function_id
-from timebase_mcp.runtime.state import TimeBaseRuntime
-from timebase_mcp.tools.common import InstanceName
-
+from timebase_mcp.tools.common import InstanceName, run_tool_operation
 
 QQLFunctionId = Annotated[
     str | None,
@@ -44,7 +42,7 @@ def register_query_tools(mcp: MCPServer) -> None:
             description="Maximum number of result rows to include in preview text",
         ),
     ) -> str:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: query_service.execute_query(client, query, limit),
             instance_key=instance_key,
@@ -69,7 +67,7 @@ def register_query_tools(mcp: MCPServer) -> None:
         instance_key: InstanceName = None,
         query: str = Field(description="TimeBase QQL query text"),
     ) -> CompileQQLResult:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: query_service.compile_query(client, query),
             instance_key=instance_key,
@@ -102,7 +100,7 @@ def register_query_tools(mcp: MCPServer) -> None:
             ),
         ),
     ) -> QQLFunctionsResult:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: query_service.list_qql_functions(client, kind, function_id),
             instance_key=instance_key,

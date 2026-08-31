@@ -10,10 +10,9 @@ from timebase_mcp.models.core import (
     StreamSymbols,
     StreamTimeRange,
 )
-from timebase_mcp.runtime.operations import run_with_context
-from timebase_mcp.services import streams as stream_service
 from timebase_mcp.runtime.state import TimeBaseRuntime
-from timebase_mcp.tools.common import InstanceName
+from timebase_mcp.services import streams as stream_service
+from timebase_mcp.tools.common import InstanceName, run_tool_operation
 
 
 def register_stream_tools(mcp: MCPServer) -> None:
@@ -31,7 +30,7 @@ def register_stream_tools(mcp: MCPServer) -> None:
         ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
     ) -> list[StreamInfo]:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: stream_service.list_streams(client),
             instance_key=instance_key,
@@ -51,7 +50,7 @@ def register_stream_tools(mcp: MCPServer) -> None:
         stream_key: str = Field(description="Stream key to inspect"),
         instance_key: InstanceName = None,
     ) -> StreamSchema:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: stream_service.get_stream_schema(client, stream_key),
             instance_key=instance_key,
@@ -71,7 +70,7 @@ def register_stream_tools(mcp: MCPServer) -> None:
         stream_key: str = Field(description="Stream key to inspect"),
         instance_key: InstanceName = None,
     ) -> StreamTimeRange:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: stream_service.get_stream_time_range(client, stream_key),
             instance_key=instance_key,
@@ -91,7 +90,7 @@ def register_stream_tools(mcp: MCPServer) -> None:
         stream_key: str = Field(description="Stream key to inspect"),
         instance_key: InstanceName = None,
     ) -> StreamSpaces:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: stream_service.get_stream_spaces(client, stream_key),
             instance_key=instance_key,
@@ -114,7 +113,7 @@ def register_stream_tools(mcp: MCPServer) -> None:
         ),
         instance_key: InstanceName = None,
     ) -> StreamSpaceTimeRange:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: stream_service.get_stream_space_time_range(
                 client, stream_key, space
@@ -148,7 +147,7 @@ def register_stream_tools(mcp: MCPServer) -> None:
             ),
         ),
     ) -> StreamSymbols:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: stream_service.get_stream_symbols(
                 client,
@@ -188,7 +187,7 @@ def register_stream_tools(mcp: MCPServer) -> None:
             description="Optional stream space to read from; use an empty string for the default space",
         ),
     ) -> str:
-        return await run_with_context(
+        return await run_tool_operation(
             ctx,
             lambda client: stream_service.get_stream_messages_text(
                 client,

@@ -21,7 +21,7 @@ from timebase_mcp.services.monitoring import (
 from timebase_mcp.services.monitoring import (
     list_timebase_activity as list_activity,
 )
-from timebase_mcp.tools.common import InstanceName
+from timebase_mcp.tools.common import InstanceName, with_tool_errors
 
 _LIMITED_SERVER_SUPPORT_NOTE = "Limited TimeBase server versions support."
 
@@ -84,7 +84,7 @@ def register_system_tools(mcp: MCPServer) -> None:
         instance_key: InstanceName = None,
     ) -> TimeBaseStatus:
         runtime = ctx.request_context.lifespan_context
-        return await get_status(runtime, instance_key=instance_key)
+        return await with_tool_errors(get_status(runtime, instance_key=instance_key))
 
     @mcp.tool(
         name="list_timebase_activity",
@@ -113,11 +113,13 @@ def register_system_tools(mcp: MCPServer) -> None:
         ),
     ) -> TimeBaseActivityList:
         runtime = ctx.request_context.lifespan_context
-        return await list_activity(
-            runtime,
-            instance_key=instance_key,
-            kind=kind,
-            limit=limit,
+        return await with_tool_errors(
+            list_activity(
+                runtime,
+                instance_key=instance_key,
+                kind=kind,
+                limit=limit,
+            )
         )
 
     @mcp.tool(
@@ -164,15 +166,17 @@ def register_system_tools(mcp: MCPServer) -> None:
         ),
     ) -> TimeBaseActivityDetail:
         runtime = ctx.request_context.lifespan_context
-        return await get_activity_detail(
-            runtime,
-            instance_key=instance_key,
-            kind=kind,
-            id=id,
-            include_instruments=include_instruments,
-            instrument_offset=instrument_offset,
-            instrument_limit=instrument_limit,
-            instrument_filter=instrument_filter,
+        return await with_tool_errors(
+            get_activity_detail(
+                runtime,
+                instance_key=instance_key,
+                kind=kind,
+                id=id,
+                include_instruments=include_instruments,
+                instrument_offset=instrument_offset,
+                instrument_limit=instrument_limit,
+                instrument_filter=instrument_filter,
+            )
         )
 
     _ = (
