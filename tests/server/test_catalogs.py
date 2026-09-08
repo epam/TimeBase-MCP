@@ -54,6 +54,7 @@ async def test_list_tools_resources_and_templates(
             "execute_query",
             "compile_query",
             "list_qql_functions",
+            "search_logs_kb",
         ]
     )
     for tool in tools_result.tools:
