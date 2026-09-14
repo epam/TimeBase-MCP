@@ -154,7 +154,7 @@ Follow the [official guide](https://modelcontextprotocol.io/docs/develop/connect
 <summary>Claude Code</summary>
 
 ```bash
-claude mcp add timebase-mcp --transport stdio --env TIMEBASE_URL='dxtick://localhost:8011' -- timebase-mcp
+claude mcp add timebase-mcp --transport stdio --env TIMEBASE_URL=dxtick://localhost:8011 -- timebase-mcp
 ```
 
 > [!NOTE]
