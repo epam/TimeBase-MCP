@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+import math
 import time
+from abc import ABC, abstractmethod
+from base64 import b64encode
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib import error, parse, request
 
+from typing_extensions import override
+
 TOKEN_REQUEST_TIMEOUT_SECONDS = 30
 TOKEN_EXPIRY_SKEW_SECONDS = 30.0
+MAX_TOKEN_RESPONSE_BYTES = 32 * 1024
 OAUTH2_RESERVED_PARAMS = {
     "grant_type",
     "client_id",
@@ -27,9 +33,13 @@ class OAuth2ClientCredentialsConfig:
 
 
 @dataclass(frozen=True)
-class _CachedAccessToken:
-    access_token: str
-    expires_at_monotonic: float | None
+class OAuth2PasswordConfig:
+    token_url: str
+    username: str
+    password: str
+    client_id: str
+    client_secret: str
+    scope: str | None = None
 
 
 @dataclass(frozen=True)
@@ -110,7 +120,11 @@ def parse_expires_in(value: object) -> float | None:
             "OAuth2 token response contains an invalid expires_in value."
         )
 
-    if expires_in_seconds <= 0:
+    if (
+        not math.isfinite(expires_in_seconds)
+        or expires_in_seconds <= 0
+        or isinstance(value, bool)
+    ):
         raise ValueError(
             "OAuth2 token response must include a positive expires_in value when present."
         )
@@ -141,6 +155,14 @@ def build_token_request_fields(
     return token_request_fields
 
 
+class _NoTokenRedirect(request.HTTPRedirectHandler):
+    @override
+    def redirect_request(
+        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> None:
+        return None
+
+
 class UrlLibTokenEndpointClient:
     def __init__(
         self,
@@ -148,18 +170,30 @@ class UrlLibTokenEndpointClient:
         urlopen: Callable[..., Any] = request.urlopen,
         timeout_seconds: int = TOKEN_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
-        self._urlopen = urlopen
+        self._urlopen = (
+            request.build_opener(_NoTokenRedirect).open
+            if urlopen is request.urlopen
+            else urlopen
+        )
         self._timeout_seconds = timeout_seconds
 
-    def post_form(self, token_url: str, fields: dict[str, str]) -> dict[str, Any]:
+    def post_form(
+        self,
+        token_url: str,
+        fields: dict[str, str],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         encoded_request_body = parse.urlencode(fields).encode("utf-8")
+        request_headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        request_headers.update(headers or {})
         token_request = request.Request(
             url=token_url,
             data=encoded_request_body,
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+            headers=request_headers,
             method="POST",
         )
 
@@ -167,19 +201,26 @@ class UrlLibTokenEndpointClient:
             with self._urlopen(
                 token_request, timeout=self._timeout_seconds
             ) as response:
-                response_body = response.read().decode("utf-8")
+                if response.status != 200:
+                    raise ConnectionError(
+                        f"OAuth2 token endpoint returned HTTP {response.status}; expected HTTP 200."
+                    )
+                raw = response.read(MAX_TOKEN_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_TOKEN_RESPONSE_BYTES:
+                    raise ValueError(
+                        "OAuth2 token response exceeded the 32 KiB response limit."
+                    )
+                response_body = raw.decode("utf-8")
         except error.HTTPError as exc:
-            message = (
-                f"OAuth2 token request failed with HTTP {exc.code}: "
-                f"{read_http_error_response(exc)}"
-            )
+            exc.close()
+            message = f"OAuth2 token request failed with HTTP {exc.code}."
             if exc.code in {400, 401, 403}:
                 raise PermissionError(message) from exc
             raise ConnectionError(message) from exc
         except TimeoutError as exc:
             raise ConnectionError("OAuth2 token request timed out.") from exc
         except error.URLError as exc:
-            raise ConnectionError(f"OAuth2 token request failed: {exc.reason}") from exc
+            raise ConnectionError("OAuth2 token endpoint unavailable.") from exc
 
         return parse_json_token_response(response_body)
 
@@ -197,26 +238,33 @@ def parse_json_token_response(response_body: str) -> dict[str, Any]:
     return token_response
 
 
-def read_http_error_response(exc: error.HTTPError) -> str:
-    response_body = exc.read().decode("utf-8", errors="replace").strip()
-    if not response_body:
-        return exc.reason
+class _CachedOAuth2Provider(ABC):
+    def __init__(
+        self,
+        *,
+        urlopen: Callable[..., Any],
+        monotonic: Callable[[], float],
+    ) -> None:
+        self._token_endpoint = UrlLibTokenEndpointClient(urlopen=urlopen)
+        self._monotonic = monotonic
+        self._cached_token: TokenResponse | None = None
 
-    try:
-        error_payload = json.loads(response_body)
-    except json.JSONDecodeError:
-        return response_body
+    def get_access_token(self) -> str:
+        if self._cached_token is None or token_has_expired(
+            self._cached_token.expires_at_monotonic, monotonic=self._monotonic
+        ):
+            self._cached_token = parse_token_response(
+                self._request_token(),
+                monotonic=self._monotonic,
+                access_token_error="OAuth2 token response did not include a valid access_token.",
+            )
+        return self._cached_token.access_token
 
-    if isinstance(error_payload, dict):
-        for key in ("error_description", "error", "message"):
-            detail = error_payload.get(key)
-            if isinstance(detail, str) and detail:
-                return detail
-
-    return response_body
+    @abstractmethod
+    def _request_token(self) -> dict[str, Any]: ...
 
 
-class OAuth2ClientCredentialsProvider:
+class OAuth2ClientCredentialsProvider(_CachedOAuth2Provider):
     def __init__(
         self,
         config: OAuth2ClientCredentialsConfig,
@@ -224,22 +272,11 @@ class OAuth2ClientCredentialsProvider:
         urlopen: Callable[..., Any] = request.urlopen,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
+        super().__init__(urlopen=urlopen, monotonic=monotonic)
         self._config = config
-        self._token_endpoint = UrlLibTokenEndpointClient(urlopen=urlopen)
-        self._monotonic = monotonic
-        self._cached_token: _CachedAccessToken | None = None
 
-    def get_access_token(self) -> str:
-        if self._cached_token is not None and not self._token_has_expired(
-            self._cached_token
-        ):
-            return self._cached_token.access_token
-
-        cached_token = self._request_access_token()
-        self._cached_token = cached_token
-        return cached_token.access_token
-
-    def _request_access_token(self) -> _CachedAccessToken:
+    @override
+    def _request_token(self) -> dict[str, Any]:
         base_fields = {
             "grant_type": "client_credentials",
             "client_id": self._config.client_id,
@@ -247,29 +284,44 @@ class OAuth2ClientCredentialsProvider:
         }
         if self._config.scope is not None:
             base_fields["scope"] = self._config.scope
-
-        token_request_fields = build_token_request_fields(
+        fields = build_token_request_fields(
             base_fields,
             extra_fields=self._config.token_params,
-            reserved_params_error_prefix="TIMEBASE_OAUTH2_TOKEN_PARAMS",
+            reserved_params_error_prefix="OAuth2 token parameters",
         )
-        token_response = parse_token_response(
-            self._token_endpoint.post_form(
-                self._config.token_url, token_request_fields
-            ),
-            monotonic=self._monotonic,
-            access_token_error=(
-                "OAuth2 token response did not include a valid access_token."
-            ),
-        )
+        return self._token_endpoint.post_form(self._config.token_url, fields)
 
-        return _CachedAccessToken(
-            access_token=token_response.access_token,
-            expires_at_monotonic=token_response.expires_at_monotonic,
-        )
 
-    def _token_has_expired(self, token: _CachedAccessToken) -> bool:
-        return token_has_expired(token.expires_at_monotonic, monotonic=self._monotonic)
+class OAuth2PasswordProvider(_CachedOAuth2Provider):
+    def __init__(
+        self,
+        config: OAuth2PasswordConfig,
+        *,
+        urlopen: Callable[..., Any] = request.urlopen,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        super().__init__(urlopen=urlopen, monotonic=monotonic)
+        self._config = config
+
+    @override
+    def _request_token(self) -> dict[str, Any]:
+        fields = {
+            "grant_type": "password",
+            "username": self._config.username,
+            "password": self._config.password,
+        }
+        if self._config.scope is not None:
+            fields["scope"] = self._config.scope
+        return self._token_endpoint.post_form(
+            self._config.token_url,
+            fields,
+            headers={
+                "Authorization": "Basic "
+                + b64encode(
+                    f"{self._config.client_id}:{self._config.client_secret}".encode()
+                ).decode()
+            },
+        )
 
 
 def get_oauth2_access_token(

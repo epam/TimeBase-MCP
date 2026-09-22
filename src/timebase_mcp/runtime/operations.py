@@ -172,6 +172,50 @@ async def run_with_context(
     )
 
 
+async def run_http_with_runtime(
+    runtime: TimeBaseRuntime,
+    operation: Callable[[TimeBaseInstanceRuntime], ResultT],
+    *,
+    instance_key: str | None = None,
+) -> ResultT:
+    """Run a bounded HTTP operation against one configured instance."""
+    try:
+        instance = runtime.get_instance(instance_key)
+    except ValueError as exc:
+        raise TimeBaseOperationError(str(exc)) from exc
+
+    await runtime.operation_budget.acquire()
+
+    async def execute() -> ResultT:
+        try:
+            return await asyncio.to_thread(operation, instance)
+        finally:
+            await runtime.operation_budget.release()
+
+    def finished(task: asyncio.Task[ResultT]) -> None:
+        runtime.http_operations.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    task = asyncio.create_task(execute())
+    runtime.http_operations.add(task)
+    task.add_done_callback(finished)
+    try:
+        timeout_seconds = runtime.server_settings.operation_timeout_seconds
+        if timeout_seconds > 0:
+            try:
+                return await asyncio.wait_for(asyncio.shield(task), timeout_seconds)
+            except TimeoutError as exc:
+                raise TimeBaseOperationTimeoutError(
+                    f"HTTP operation timed out after {timeout_seconds} seconds."
+                ) from exc
+        return await asyncio.shield(task)
+    except TimeBaseMCPError:
+        raise
+    except Exception as exc:
+        raise TimeBaseOperationError(str(exc)) from exc
+
+
 def _begin_stop(
     lease: TimeBaseConnectionLease[TimeBaseClient],
     operation_future: asyncio.Future[ResultT],

@@ -1,47 +1,33 @@
 import io
 import json
 from email.message import Message
+from unittest.mock import Mock
 from urllib import error, parse
+from urllib.response import addinfourl
 
 import pytest
-from typing_extensions import Self
 
 from timebase_mcp.auth.oauth2 import (
     OAuth2ClientCredentialsConfig,
     OAuth2ClientCredentialsProvider,
+    OAuth2PasswordConfig,
+    OAuth2PasswordProvider,
     UrlLibTokenEndpointClient,
     get_oauth2_access_token,
     get_oauth2_provider,
+    parse_expires_in,
     parse_token_response,
 )
 
 
-class DummyResponse:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self._payload = json.dumps(payload).encode("utf-8")
-
-    def read(self) -> bytes:
-        return self._payload
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        return False
-
-
-class RawResponse:
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    def read(self) -> bytes:
-        return self._payload
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        return False
+def token_response(
+    payload: dict[str, object] | bytes, *, status: int = 200
+) -> addinfourl:
+    if isinstance(payload, dict):
+        payload = json.dumps(payload).encode("utf-8")
+    return addinfourl(
+        io.BytesIO(payload), Message(), "https://idp.example/token", code=status
+    )
 
 
 class Clock:
@@ -50,6 +36,63 @@ class Clock:
 
     def __call__(self) -> float:
         return self.current
+
+
+@pytest.mark.parametrize("value", [True, float("nan"), float("inf"), "NaN", "Infinity"])
+def test_token_expiry_rejects_nonfinite_values(value: object) -> None:
+    with pytest.raises(ValueError):
+        parse_expires_in(value)
+
+
+def test_token_response_size_is_bounded() -> None:
+    client = UrlLibTokenEndpointClient(
+        urlopen=lambda *args, **kwargs: token_response(b"x" * 200000)
+    )
+    with pytest.raises(ValueError, match="response limit"):
+        client.post_form("https://idp.example/token", {"grant_type": "password"})
+
+
+@pytest.mark.parametrize("mode", ["password", "client_credentials"])
+@pytest.mark.parametrize("status", [201, 202, 204, 206])
+def test_token_provider_rejects_non_200_before_reading_or_caching(
+    monkeypatch, mode, status
+):
+    rejected = token_response({"access_token": "private-token"}, status=status)
+    read = Mock(wraps=rejected.read)
+    monkeypatch.setattr(rejected, "read", read)
+    accepted = token_response({"access_token": "valid-token", "expires_in": 3600})
+    responses = [rejected, accepted]
+
+    def urlopen(*args, **kwargs):
+        return responses.pop(0)
+
+    if mode == "password":
+        provider = OAuth2PasswordProvider(
+            OAuth2PasswordConfig(
+                token_url="https://idp.example/token",
+                username="user",
+                password="secret",
+                client_id="client-id",
+                client_secret="client-secret",
+            ),
+            urlopen=urlopen,
+        )
+    else:
+        provider = OAuth2ClientCredentialsProvider(
+            build_oauth2_config(), urlopen=urlopen
+        )
+
+    with pytest.raises(
+        ConnectionError, match=f"HTTP {status}.*expected HTTP 200"
+    ) as exc:
+        provider.get_access_token()
+    assert "private-token" not in str(exc.value)
+    assert rejected.closed
+    read.assert_not_called()
+    assert provider.get_access_token() == "valid-token"
+    assert provider.get_access_token() == "valid-token"
+    assert accepted.closed
+    assert not responses
 
 
 def build_oauth2_config(**overrides: object) -> OAuth2ClientCredentialsConfig:
@@ -87,7 +130,7 @@ def test_oauth2_provider_posts_expected_token_request() -> None:
         }
         captured_request["body"] = request_obj.data.decode("utf-8")
         captured_request["timeout"] = timeout
-        return DummyResponse({"access_token": "token-1", "expires_in": 120})
+        return token_response({"access_token": "token-1", "expires_in": 120})
 
     provider = OAuth2ClientCredentialsProvider(
         build_oauth2_config(),
@@ -113,58 +156,78 @@ def test_oauth2_provider_posts_expected_token_request() -> None:
     }
 
 
-def test_oauth2_provider_reuses_cached_token_until_expiry() -> None:
-    response_count = 0
-    clock = Clock(100.0)
+def test_oauth2_password_provider_posts_expected_cached_token_request() -> None:
+    captured_bodies: list[str] = []
+    captured_headers: dict[str, str] = {}
 
     def fake_urlopen(request_obj, timeout: int):
-        del request_obj, timeout
-        nonlocal response_count
-        response_count += 1
-        return DummyResponse(
-            {"access_token": f"token-{response_count}", "expires_in": 120}
+        assert request_obj.full_url == "http://localhost:8099/oauth/token"
+        assert timeout == 30
+        captured_bodies.append(request_obj.data.decode("utf-8"))
+        captured_headers.update(
+            {key.lower(): value for key, value in request_obj.header_items()}
         )
+        return token_response({"access_token": "token-1", "expires_in": 120})
 
-    provider = OAuth2ClientCredentialsProvider(
-        build_oauth2_config(),
+    provider = OAuth2PasswordProvider(
+        OAuth2PasswordConfig(
+            token_url="http://localhost:8099/oauth/token",
+            username="admin",
+            password="secret",
+            client_id="client-id",
+            client_secret="client-secret",
+        ),
         urlopen=fake_urlopen,
-        monotonic=clock,
+        monotonic=Clock(100.0),
     )
 
-    first_access_token = provider.get_access_token()
-    clock.current = 150.0
-    second_access_token = provider.get_access_token()
+    assert provider.get_access_token() == "token-1"
+    assert provider.get_access_token() == "token-1"
+    assert len(captured_bodies) == 1
+    assert captured_headers["authorization"] == "Basic Y2xpZW50LWlkOmNsaWVudC1zZWNyZXQ="
+    assert parse.parse_qs(captured_bodies[0]) == {
+        "grant_type": ["password"],
+        "username": ["admin"],
+        "password": ["secret"],
+    }
 
-    assert first_access_token == "token-1"
-    assert second_access_token == "token-1"
-    assert response_count == 1
 
-
-def test_oauth2_provider_refreshes_expired_token() -> None:
-    response_count = 0
+@pytest.mark.parametrize("mode", ["password", "client_credentials"])
+def test_token_provider_reuses_then_reacquires_at_expiry(mode):
     clock = Clock(100.0)
+    responses = [
+        token_response({"access_token": "first", "expires_in": 60}),
+        token_response({"access_token": "second", "expires_in": 60}),
+    ]
 
-    def fake_urlopen(request_obj, timeout: int):
-        del request_obj, timeout
-        nonlocal response_count
-        response_count += 1
-        return DummyResponse(
-            {"access_token": f"token-{response_count}", "expires_in": 60}
+    def urlopen(*args, **kwargs):
+        return responses.pop(0)
+
+    if mode == "password":
+        provider = OAuth2PasswordProvider(
+            OAuth2PasswordConfig(
+                token_url="https://idp.example/token",
+                username="user",
+                password="password",
+                client_id="client",
+                client_secret="secret",
+            ),
+            urlopen=urlopen,
+            monotonic=clock,
         )
-
-    provider = OAuth2ClientCredentialsProvider(
-        build_oauth2_config(),
-        urlopen=fake_urlopen,
-        monotonic=clock,
-    )
-
-    first_access_token = provider.get_access_token()
-    clock.current = 131.0
-    second_access_token = provider.get_access_token()
-
-    assert first_access_token == "token-1"
-    assert second_access_token == "token-2"
-    assert response_count == 2
+    else:
+        provider = OAuth2ClientCredentialsProvider(
+            build_oauth2_config(),
+            urlopen=urlopen,
+            monotonic=clock,
+        )
+    assert provider.get_access_token() == "first"
+    clock.current = 129.0
+    assert provider.get_access_token() == "first"
+    clock.current = 130.0
+    assert provider.get_access_token() == "second"
+    assert provider.get_access_token() == "second"
+    assert not responses
 
 
 def test_oauth2_provider_raises_for_http_error() -> None:
@@ -175,7 +238,7 @@ def test_oauth2_provider_raises_for_http_error() -> None:
             code=401,
             msg="Unauthorized",
             hdrs=Message(),
-            fp=io.BytesIO(b'{"error_description": "invalid client"}'),
+            fp=io.BytesIO(b'{"error_description": "private-server-detail"}'),
         )
 
     provider = OAuth2ClientCredentialsProvider(
@@ -183,14 +246,42 @@ def test_oauth2_provider_raises_for_http_error() -> None:
         urlopen=fake_urlopen,
     )
 
-    with pytest.raises(PermissionError, match="HTTP 401: invalid client"):
+    with pytest.raises(PermissionError, match="HTTP 401") as exc:
+        provider.get_access_token()
+    assert "private-server-detail" not in str(exc.value)
+
+
+@pytest.mark.parametrize("status_code", [400, 401, 403])
+def test_oauth2_password_provider_maps_token_authorization_errors(
+    status_code: int,
+) -> None:
+    provider = OAuth2PasswordProvider(
+        OAuth2PasswordConfig(
+            token_url="https://idp.example/token",
+            username="admin",
+            password="secret",
+            client_id="client-id",
+            client_secret="client-secret",
+        ),
+        urlopen=lambda request_obj, timeout: (_ for _ in ()).throw(
+            error.HTTPError(
+                url="https://idp.example/token",
+                code=status_code,
+                msg="Denied",
+                hdrs=Message(),
+                fp=io.BytesIO(b'{"error_description": "token denied"}'),
+            )
+        ),
+    )
+
+    with pytest.raises(PermissionError, match=rf"HTTP {status_code}"):
         provider.get_access_token()
 
 
 def test_oauth2_provider_rejects_reserved_token_params() -> None:
     provider = OAuth2ClientCredentialsProvider(
         build_oauth2_config(token_params={"scope": "override"}),
-        urlopen=lambda request_obj, timeout: DummyResponse(
+        urlopen=lambda request_obj, timeout: token_response(
             {"access_token": "unused", "expires_in": 120}
         ),
     )
@@ -214,7 +305,7 @@ def test_get_oauth2_provider_reuses_passed_provider() -> None:
 def test_get_oauth2_access_token_uses_passed_provider() -> None:
     provider = OAuth2ClientCredentialsProvider(
         build_oauth2_config(),
-        urlopen=lambda request_obj, timeout: DummyResponse(
+        urlopen=lambda request_obj, timeout: token_response(
             {"access_token": "token-1", "expires_in": 120}
         ),
     )
@@ -242,14 +333,14 @@ def test_oauth2_provider_raises_for_url_error() -> None:
         ),
     )
 
-    with pytest.raises(ConnectionError, match="connection refused"):
+    with pytest.raises(ConnectionError, match="endpoint unavailable"):
         provider.get_access_token()
 
 
 def test_oauth2_provider_raises_for_invalid_json_response() -> None:
     provider = OAuth2ClientCredentialsProvider(
         build_oauth2_config(),
-        urlopen=lambda request_obj, timeout: RawResponse(b"not-json"),
+        urlopen=lambda request_obj, timeout: token_response(b"not-json"),
     )
 
     with pytest.raises(ValueError, match="not valid JSON"):
@@ -259,7 +350,7 @@ def test_oauth2_provider_raises_for_invalid_json_response() -> None:
 def test_oauth2_provider_raises_for_non_object_json_response() -> None:
     provider = OAuth2ClientCredentialsProvider(
         build_oauth2_config(),
-        urlopen=lambda request_obj, timeout: RawResponse(b'["not-an-object"]'),
+        urlopen=lambda request_obj, timeout: token_response(b'["not-an-object"]'),
     )
 
     with pytest.raises(ValueError, match="must be a JSON object"):
@@ -269,7 +360,7 @@ def test_oauth2_provider_raises_for_non_object_json_response() -> None:
 def test_oauth2_provider_raises_for_missing_access_token() -> None:
     provider = OAuth2ClientCredentialsProvider(
         build_oauth2_config(),
-        urlopen=lambda request_obj, timeout: DummyResponse({"expires_in": 120}),
+        urlopen=lambda request_obj, timeout: token_response({"expires_in": 120}),
     )
 
     with pytest.raises(ValueError, match="valid access_token"):
@@ -279,7 +370,7 @@ def test_oauth2_provider_raises_for_missing_access_token() -> None:
 def test_oauth2_provider_raises_for_invalid_expires_in() -> None:
     provider = OAuth2ClientCredentialsProvider(
         build_oauth2_config(),
-        urlopen=lambda request_obj, timeout: DummyResponse(
+        urlopen=lambda request_obj, timeout: token_response(
             {"access_token": "token-1", "expires_in": "not-a-number"}
         ),
     )
@@ -309,7 +400,7 @@ def test_token_endpoint_client_posts_form_with_content_type() -> None:
         }
         captured_request["body"] = request_obj.data.decode("utf-8")
         captured_request["timeout"] = timeout
-        return DummyResponse({"access_token": "token-1"})
+        return token_response({"access_token": "token-1"})
 
     client = UrlLibTokenEndpointClient(urlopen=fake_urlopen)
     payload = client.post_form(

@@ -33,7 +33,16 @@ def http_base_url_candidates(value: str | Sequence[str] | None) -> tuple[str, ..
 
 def quote_path_segment(value: str) -> str:
     """Escape a caller-supplied value used as a single URL path segment."""
+    if value in {".", ".."}:
+        raise ValueError("Path identifier must not be '.' or '..'.")
     return quote(value, safe="")
+
+
+def build_http_url(http_base_url: str, endpoint: str) -> str:
+    """Build a URL below an HTTP base URL without replacing its path."""
+    base_url = _normalize_http_base_url(http_base_url)
+    path = endpoint.strip("/")
+    return base_url if not path else base_url + "/" + path
 
 
 def build_tb_url(http_base_url: str, endpoint: str) -> str:
@@ -50,7 +59,7 @@ def build_tb_url(http_base_url: str, endpoint: str) -> str:
         path = path[3:]
 
     tb_base = base_url if base_url.endswith("/tb") else base_url + "/tb"
-    return tb_base if not path else tb_base + "/" + path
+    return build_http_url(tb_base, path)
 
 
 def derive_http_base_urls(tb_url: str) -> tuple[str, ...]:

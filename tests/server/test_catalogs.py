@@ -7,6 +7,26 @@ from mcp.client import Client
 from tests.server.helpers import (
     LOCAL_TOOL_NAMES,
 )
+from timebase_mcp.config.settings import MCPSettings
+from timebase_mcp.server import create_server
+
+
+@pytest.mark.parametrize(
+    ("mode", "protocol_version"),
+    [
+        ("auto", "2026-07-28"),
+        ("legacy", "2025-11-25"),
+    ],
+)
+@pytest.mark.anyio
+async def test_supported_protocol_versions(
+    mode: str,
+    protocol_version: str,
+) -> None:
+    async with Client(create_server(MCPSettings()), mode=mode) as client_session:
+        await client_session.list_tools()
+
+        assert client_session.protocol_version == protocol_version
 
 
 @pytest.mark.anyio

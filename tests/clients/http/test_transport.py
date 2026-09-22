@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from base64 import b64encode
+from contextlib import contextmanager
 
 import httpx2
 import pytest
@@ -8,9 +9,11 @@ from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 from pydantic import SecretStr
+from typing_extensions import override
 
 from timebase_mcp.clients.http.transport import (
     get_http_base_url,
+    http_request,
     timebase_http_request,
 )
 from timebase_mcp.clients.http.urls import (
@@ -108,6 +111,15 @@ def test_quote_path_segment_escapes_separators_and_keeps_plain_ids() -> None:
     assert quote_path_segment("../server/system") == "..%2Fserver%2Fsystem"
     assert quote_path_segment("1?offset=9") == "1%3Foffset%3D9"
     assert quote_path_segment("a#b") == "a%23b"
+    assert quote_path_segment("...") == "..."
+    assert quote_path_segment("..name") == "..name"
+    assert quote_path_segment("%2e%2e") == "%252e%252e"
+
+
+@pytest.mark.parametrize("identifier", [".", ".."])
+def test_quote_path_segment_rejects_dot_identifiers(identifier: str) -> None:
+    with pytest.raises(ValueError, match="must not be '.' or '..'"):
+        quote_path_segment(identifier)
 
 
 def test_build_tb_url_accepts_root_or_tb_base() -> None:
@@ -399,3 +411,67 @@ def test_timebase_http_request_sends_forwarded_identity_bearer() -> None:
         auth_context_var.reset(reset)
 
     assert response.json() == {"ok": True}
+
+
+@pytest.mark.parametrize("limit", [None, 128])
+def test_native_http_retains_trust_override(monkeypatch, limit):
+    from contextlib import contextmanager
+
+    from timebase_mcp.clients.http import transport
+
+    monkeypatch.setenv("DXAPI_SSL_TRUST_ALL", "true")
+    monkeypatch.setattr(transport, "_trust_all_warning_emitted", False)
+    calls = []
+
+    def request(method, url, **kwargs):
+        calls.append((url, kwargs["verify"]))
+        return httpx2.Response(200, json={}, request=httpx2.Request(method, url))
+
+    @contextmanager
+    def stream(method, url, **kwargs):
+        yield request(method, url, **kwargs)
+
+    monkeypatch.setattr(httpx2, "request", request)
+    monkeypatch.setattr(httpx2, "stream", stream)
+    response = timebase_http_request(
+        _http_instance(), "/oauthinfo", auth=False, max_response_bytes=limit
+    )
+    assert response.status_code == 200
+    assert calls == [
+        ("https://tb.example.com:8011/tb/ping", False),
+        ("https://tb.example.com:8011/tb/oauthinfo", False),
+    ]
+
+
+def test_http_response_limit_stops_stream_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    consumed = []
+    closed = []
+
+    class Body(httpx2.SyncByteStream):
+        @override
+        def __iter__(self):
+            for _ in range(10):
+                consumed.append(1)
+                yield b"x" * 8192
+
+        @override
+        def close(self):
+            closed.append(True)
+
+    @contextmanager
+    def stream(*args, **kwargs):
+        response = httpx2.Response(
+            200, request=httpx2.Request("GET", "https://example.com"), stream=Body()
+        )
+        try:
+            yield response
+        finally:
+            response.close()
+
+    monkeypatch.setattr(httpx2, "stream", stream)
+    with pytest.raises(ValueError, match="response limit"):
+        http_request("GET", "https://example.com", max_response_bytes=8192)
+    assert len(consumed) <= 2
+    assert closed

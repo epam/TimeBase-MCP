@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import logging
 import threading
 import time
@@ -19,11 +20,56 @@ from timebase_mcp.errors import (
     TimeBaseOperationStateError,
     TimeBaseOperationTimeoutError,
 )
-from timebase_mcp.runtime.operations import run_with_runtime
+from timebase_mcp.runtime.operations import run_http_with_runtime, run_with_runtime
 from timebase_mcp.runtime.pool import TimeBaseConnectionPool, TimeBaseOperationBudget
 from timebase_mcp.runtime.state import build_runtime
 
 _ASYNCIO_WAIT_FOR = asyncio.wait_for
+
+
+@pytest.mark.anyio
+async def test_http_operation_copies_caller_context() -> None:
+    runtime = build_runtime(MCPSettings())
+    identity = contextvars.ContextVar("identity", default="anonymous")
+
+    def operation(instance):
+        caller = identity.get()
+        identity.set("worker")
+        return caller
+
+    token = identity.set("caller")
+    try:
+        assert await run_http_with_runtime(runtime, operation) == "caller"
+        assert identity.get() == "caller"
+    finally:
+        identity.reset(token)
+        await runtime.aclose()
+
+
+@pytest.mark.anyio
+async def test_cancelled_http_operation_holds_budget_until_thread_finishes() -> None:
+    runtime = build_runtime(MCPSettings(max_concurrent_ops=1))
+    started, release = threading.Event(), threading.Event()
+
+    def blocked(instance):
+        started.set()
+        _wait_for_test_release(release)
+        return 1
+
+    task = asyncio.create_task(run_http_with_runtime(runtime, blocked))
+    try:
+        await _wait_until(started.is_set, "HTTP worker did not start")
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        with pytest.raises(TimeBaseOperationLimitError):
+            await run_http_with_runtime(runtime, lambda instance: 2)
+    finally:
+        release.set()
+        await runtime.aclose()
+
+    await runtime.operation_budget.acquire()
+    await runtime.operation_budget.release()
 
 
 def _wait_for_test_release(

@@ -11,6 +11,7 @@ class TimeBaseServerConfiguration(BaseModel):
     edition: str | None = None
     outbound_auth_mode: str = "none"
     http_url: str | None = None
+    webadmin_url: str | None = None
     read_only: bool = False
     dxapi_ssl_termination: bool = False
     dxapi_ssl_trust_all: bool = False

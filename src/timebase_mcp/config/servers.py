@@ -16,12 +16,21 @@ from timebase_mcp.config.oauth import (
 )
 from timebase_mcp.config.types import OutboundAuthMode
 from timebase_mcp.config.urls import extract_timebase_url_credentials
+from timebase_mcp.config.webadmin import (
+    WEBADMIN_FIELD_NAMES,
+    WebAdminConfig,
+    nest_webadmin_fields,
+)
 
 INDEXED_SERVER_ENV_FIELDS: tuple[tuple[str, str], ...] = (
     ("NAME", "name"),
     ("DESCRIPTION", "description"),
     ("USERNAME", "username"),
     ("PASSWORD", "password"),
+    *(
+        ("WEBADMIN_" + name.upper(), "webadmin_" + name)
+        for name in WEBADMIN_FIELD_NAMES
+    ),
     ("READ_ONLY", "read_only"),
 )
 
@@ -147,6 +156,7 @@ class ServerConfig(BaseModel):
         description="Base URL of the TimeBase HTTP API. Defaults are derived "
         "from the TB URL when omitted.",
     )
+    webadmin: WebAdminConfig = Field(default_factory=WebAdminConfig)
     read_only: bool | None = Field(
         default=None,
         description="Open connections to this server in read-only mode.",
@@ -161,6 +171,11 @@ class ServerConfig(BaseModel):
     @classmethod
     def _normalize_token_params(cls, value: object) -> object:
         return normalize_oauth2_token_params(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_webadmin(cls, value: object) -> object:
+        return nest_webadmin_fields(value) if isinstance(value, dict) else value
 
     @property
     def instance_key(self) -> str:

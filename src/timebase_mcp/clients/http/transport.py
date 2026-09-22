@@ -154,7 +154,9 @@ def _timebase_http_request(
     url = build_tb_url(http_base_url, endpoint)
     if auth:
         kwargs = _with_auth_headers(instance, kwargs)
-    return _http_request(method, url, client=client, timeout=timeout, **kwargs)
+    return http_request(
+        method, url, client=client, timeout=timeout, verify=tls_verify(), **kwargs
+    )
 
 
 def _with_auth_headers(
@@ -175,21 +177,45 @@ def _with_auth_headers(
     return updated_kwargs
 
 
-def _http_request(
+def http_request(
     method: str,
     url: str,
     *,
-    client: httpx2.Client | None,
-    timeout: float,
+    client: httpx2.Client | None = None,
+    timeout: float = HTTP_DISCOVERY_TIMEOUT_SECONDS,
+    max_response_bytes: int | None = None,
+    verify: bool = True,
     **kwargs: Any,
 ) -> httpx2.Response:
+    if max_response_bytes is not None:
+        stream = (
+            client.stream(method, url, timeout=timeout, **kwargs)
+            if client is not None
+            else httpx2.stream(method, url, timeout=timeout, verify=verify, **kwargs)
+        )
+        with stream as response:
+            body = bytearray()
+            for chunk in response.iter_bytes(chunk_size=8192):
+                if len(body) + len(chunk) > max_response_bytes:
+                    raise ValueError("HTTP response limit exceeded.")
+                body.extend(chunk)
+            # iter_bytes decodes compression; do not decode the buffered body twice.
+            headers = dict(response.headers)
+            headers.pop("content-encoding", None)
+            headers.pop("content-length", None)
+            return httpx2.Response(
+                response.status_code,
+                headers=headers,
+                content=bytes(body),
+                request=response.request,
+            )
     if client is not None:
         return client.request(method, url, timeout=timeout, **kwargs)
     return httpx2.request(
         method,
         url,
         timeout=timeout,
-        verify=tls_verify(),
+        verify=verify,
         **kwargs,
     )
 
@@ -203,11 +229,12 @@ def _is_reachable(
 ) -> bool:
     url = build_tb_url(http_base_url, endpoint)
     try:
-        response = _http_request(
+        response = http_request(
             "GET",
             url,
             client=client,
             timeout=timeout,
+            verify=tls_verify(),
         )
     except httpx2.HTTPError:
         return False

@@ -3,7 +3,13 @@ from typing import Annotated
 
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    NoDecode,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
+from typing_extensions import override
 
 from timebase_mcp.auth.oauth2 import (
     OAUTH2_RESERVED_PARAMS,
@@ -42,6 +48,12 @@ from timebase_mcp.config.urls import (
     is_https_url,
     is_loopback_or_local_url,
     is_remote_http_bind,
+)
+from timebase_mcp.config.webadmin import (
+    WEBADMIN_ENV_VARS,
+    WEBADMIN_FIELD_NAMES,
+    WebAdminConfig,
+    WebAdminSettingsSource,
 )
 from timebase_mcp.constants import (
     DEFAULT_HOST,
@@ -181,6 +193,7 @@ class MCPSettings(BaseSettings):
         validation_alias=SettingsEnv.TIMEBASE_HTTP_URL,
         description="TimeBase HTTP API base URL.",
     )
+    webadmin: WebAdminConfig = Field(default_factory=WebAdminConfig)
     tb_read_only: bool = Field(
         default=False,
         validation_alias=SettingsEnv.TIMEBASE_READ_ONLY,
@@ -233,6 +246,23 @@ class MCPSettings(BaseSettings):
             "auth instead of IdP/JWT; re-read live so rotation needs no restart."
         ),
     )
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            WebAdminSettingsSource(init_settings),
+            WebAdminSettingsSource(env_settings),
+            WebAdminSettingsSource(dotenv_settings),
+            WebAdminSettingsSource(file_secret_settings),
+        )
 
     @field_validator("servers", mode="before")
     @classmethod
@@ -457,6 +487,7 @@ class MCPSettings(BaseSettings):
             or self.tb_password is not None
             or self.tb_auth_mode is not None
             or self.tb_http_url is not None
+            or self.webadmin != WebAdminConfig()
             or any(getattr(self, name) is not None for name in OAUTH2_CONFIG_FIELDS)
         )
         if flat_connection_configured:
@@ -613,6 +644,7 @@ class MCPSettings(BaseSettings):
             oauth2_scope=self.tb_oauth2_scope,
             oauth2_token_params=self.tb_oauth2_token_params,
             http_base_url=self.tb_http_url,
+            webadmin=self.webadmin,
             read_only=self.tb_read_only,
         )
 
@@ -662,13 +694,25 @@ class MCPSettings(BaseSettings):
             not in (None, "")
         }
 
+        payload.update(
+            {
+                "tb_webadmin_" + name: value
+                for name, env_name in zip(
+                    WEBADMIN_FIELD_NAMES, WEBADMIN_ENV_VARS, strict=True
+                )
+                if (value := os.getenv(env_name)) not in (None, "")
+            }
+        )
         return sanitize_env_log_payload(payload)
 
     def debug_log_payload(self) -> dict[str, object]:
         return redact_log_payload(self.model_dump(mode="json"))
 
 
-SETTINGS_ENV_VARS = tuple(
-    field_env_name(field_name, field_info)
-    for field_name, field_info in MCPSettings.model_fields.items()
+SETTINGS_ENV_VARS = (
+    tuple(
+        field_env_name(field_name, field_info)
+        for field_name, field_info in MCPSettings.model_fields.items()
+    )
+    + WEBADMIN_ENV_VARS
 )
