@@ -188,3 +188,7 @@ Add the following to your `opencode.jsonc`:
 ## 4. Verify
 
 Restart/reload your client and ask the agent to list TimeBase streams. If something fails, see [Troubleshooting](troubleshooting.md).
+
+## Optional WebAdmin access
+
+The setup above enables native TimeBase tools without WebAdmin. To add WebAdmin inspection, follow [Add WebAdmin access](webadmin-setup.md). That guide covers the URL, credential profiles, and verification of a protected tool.

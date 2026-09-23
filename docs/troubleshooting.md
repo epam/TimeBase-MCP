@@ -117,10 +117,11 @@ Logs are printed to stderr of the `timebase-mcp` process, look for them in the t
 
 - **OAuth discovery fails for `/tb/oauthinfo`:** MCP derives the TimeBase HTTP URL from `TIMEBASE_URL` and, when the native port is `8011`, also tries default HTTP port `8021`. Set `TIMEBASE_HTTP_URL` explicitly for proxies, custom ports, custom paths, or when automatic probing cannot reach the TimeBase HTTP API.
 
-- **Redirect URI mismatch during interactive login:** the browser shows a redirect error from your IdP. MCP sent a `redirect_uri` that is not registered on the OAuth client. Fix it:
-  1. Find `OAuth callback URI` in the MCP logs.
+- **Redirect URI mismatch during local interactive login:** the browser shows a redirect error from your IdP. MCP sent a `redirect_uri` that is not registered on the OAuth client. Fix it:
+
+  1. Find `OAuth callback URI` in the MCP logs for the affected TimeBase or WebAdmin login.
   2. Compare it to the redirect URIs registered on the OAuth client in your IdP.
-  3. Register MCP's URI on the client, or set `MCP_HOST`/`MCP_PORT` to match an existing registration (e.g. TimeBase Desktop Admin).
+  3. Register that URI on the OAuth client, or configure MCP to use an existing registered URI. For native TimeBase login, set `MCP_HOST`/`MCP_PORT`. For WebAdmin login, set `TIMEBASE_WEBADMIN_REDIRECT_URI` for the affected instance.
   4. Match host (`localhost` vs `127.0.0.1`), port, path, and trailing slash exactly; ensure the port is free when MCP logs in.
 
 - **Remote clients can't authenticate / "does not support dynamic client registration":** your IdP has no DCR. Pre-register a client app and have users supply the client ID, see [Connect to a remote server](connect-remote.md).

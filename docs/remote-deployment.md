@@ -3,7 +3,7 @@
 Use this when one `timebase-mcp` HTTP server is shared by multiple users. There are two separate auth directions:
 
 - **Inbound** protects the MCP HTTP endpoint from callers.
-- **Outbound** controls how `timebase-mcp` connects to TimeBase.
+- **Outbound** controls how `timebase-mcp` connects to TimeBase and, when configured, WebAdmin.
 
 ## OAuth
 
@@ -22,6 +22,8 @@ Use this when one `timebase-mcp` HTTP server is shared by multiple users. There 
 | **Auth at a proxy/gateway** | Reverse proxy enforces auth before traffic reaches MCP | Any non-`forward_identity` mode | Enterprise gateway already handles auth | Omit `MCP_AUTH_AUDIENCE` and `MCP_AUTH_API_KEYS_FILE`; ensure the proxy is the only reachable entry point |
 
 On HTTP transports, inbound auth is enabled when you set `MCP_AUTH_AUDIENCE` (IdP) or `MCP_AUTH_API_KEYS_FILE` (API keys).
+
+These patterns describe native TimeBase authentication. Optional [WebAdmin access](#optional-webadmin-access) uses a shared identity per configured instance, including in a per-user SSO deployment.
 
 ## 2. Configure the HTTP endpoint
 
@@ -126,6 +128,14 @@ Set `TIMEBASE_AUTH_MODE` (or leave it `auto`):
 
 > [!IMPORTANT]
 > **`forward_identity` audience requirement.** The caller's token is forwarded to TimeBase **as-is**. For both MCP and TimeBase to accept it, the token's `aud` must be valid for TimeBase and must match `MCP_AUTH_AUDIENCE`. `MCP_AUTH_PUBLIC_URL` remains the MCP endpoint URL, do not set it to the IdP URL or TimeBase URL. If you need separate audiences for MCP and TimeBase, use `oauth2_client_credentials` instead.
+
+### Optional WebAdmin access
+
+WebAdmin uses the credentials configured for each instance through `TIMEBASE_WEBADMIN_*` or the corresponding multi-server fields. MCP does not forward the caller's JWT or MCP API key to WebAdmin. Every caller uses the same WebAdmin identity for that instance.
+
+With native `forward_identity` and a WebAdmin service account, user's native TimeBase calls use user's permissions. His WebAdmin calls use the service account's permissions, as do other user's. Native per-user permissions do not restrict WebAdmin tool results.
+
+Choose a WebAdmin identity whose permissions are appropriate for every caller allowed to use this MCP deployment. Interactive WebAdmin login requires local `stdio`. To configure a remote-compatible credential profile and verify access, follow [Add WebAdmin access](webadmin-setup.md).
 
 ## 6. Remote operation limits
 
