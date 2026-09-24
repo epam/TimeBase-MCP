@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -14,12 +15,14 @@ from timebase_mcp.auth.oauth2 import (
     OAuth2ClientCredentialsConfig,
     get_oauth2_provider,
 )
+from timebase_mcp.auth.webadmin_session import WebAdminSession
 from timebase_mcp.config.servers import ServerConfig
 from timebase_mcp.config.types import (
     Edition,
     InboundAuthMode,
     OutboundAuthMode,
 )
+from timebase_mcp.config.webadmin import WebAdminConfig
 from timebase_mcp.constants import (
     FORWARD_IDENTITY_MAX_IDLE_CLIENTS,
     SHARED_PRINCIPAL_KEY,
@@ -59,6 +62,7 @@ class TimeBaseInstanceConfig:
     tb_oauth2_scope: str | None = None
     tb_oauth2_token_params: dict[str, str] | None = None
     http_base_url: str | None = None
+    webadmin: WebAdminConfig = field(default_factory=WebAdminConfig)
     read_only: bool = False
     # Bearer token forwarded from the authenticated MCP caller (forward_identity).
     access_token: str | None = None
@@ -86,6 +90,7 @@ class TimeBaseInstanceConfig:
             tb_oauth2_scope=server.oauth2_scope,
             tb_oauth2_token_params=server.oauth2_token_params,
             http_base_url=server.http_base_url,
+            webadmin=server.webadmin,
             read_only=(
                 server.read_only if server.read_only is not None else default_read_only
             ),
@@ -175,6 +180,20 @@ class TimeBaseInstanceRuntime:
         default=None,
         init=False,
         repr=False,
+    )
+    webadmin_provider: OAuth2AccessTokenProvider | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    webadmin_token_fingerprint: bytes | None = field(
+        default=None, init=False, repr=False
+    )
+    webadmin_session: WebAdminSession | None = field(
+        default=None, init=False, repr=False
+    )
+    webadmin_auth_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
     )
     oauth2_provider: OAuth2AccessTokenProvider | None = field(
         default=None,
@@ -341,6 +360,9 @@ class TimeBaseInstanceRuntime:
         await entry.pool.aclose()
 
     async def aclose(self) -> None:
+        self.webadmin_provider = None
+        self.webadmin_token_fingerprint = None
+        self.webadmin_session = None
         pools = [entry.pool for entry in self._principal_pools.values()]
         self._principal_pools.clear()
 

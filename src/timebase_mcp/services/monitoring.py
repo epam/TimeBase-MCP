@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-import contextvars
-from collections.abc import Callable
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx2
@@ -14,7 +11,7 @@ from timebase_mcp.clients.http.responses import (
 )
 from timebase_mcp.clients.http.transport import timebase_http_request
 from timebase_mcp.clients.http.urls import quote_path_segment
-from timebase_mcp.errors import TimeBaseOperationError, TimeBaseOperationTimeoutError
+from timebase_mcp.errors import TimeBaseOperationError
 from timebase_mcp.models.monitoring import (
     TimeBaseActivityDetail,
     TimeBaseActivityList,
@@ -28,54 +25,11 @@ from timebase_mcp.models.monitoring import (
     TimeBaseStatus,
 )
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
+from timebase_mcp.runtime.operations import run_http_with_runtime
 from timebase_mcp.runtime.state import TimeBaseRuntime
 
-ResultT = TypeVar("ResultT")
 ActivityKind = Literal["all", "cursors", "loaders", "connections", "locks"]
 DetailKind = Literal["cursor", "loader", "connection", "lock"]
-
-
-async def _run_monitor_operation(
-    runtime: TimeBaseRuntime,
-    operation: Callable[[TimeBaseInstanceRuntime], ResultT],
-    *,
-    instance_key: str | None = None,
-) -> ResultT:
-    try:
-        instance = runtime.get_instance(instance_key)
-    except ValueError as exc:
-        raise TimeBaseOperationError(str(exc)) from exc
-
-    await runtime.operation_budget.acquire()
-    try:
-        context = contextvars.copy_context()
-
-        def run_operation_in_context() -> ResultT:
-            return context.run(operation, instance)
-
-        future = asyncio.get_running_loop().run_in_executor(
-            None,
-            run_operation_in_context,
-        )
-        timeout_seconds = runtime.server_settings.operation_timeout_seconds
-        if timeout_seconds > 0:
-            try:
-                return await asyncio.wait_for(future, timeout_seconds)
-            except TimeoutError as exc:
-                raise TimeBaseOperationTimeoutError(
-                    f"TimeBase monitor operation timed out after {timeout_seconds} seconds."
-                ) from exc
-        return await future
-    except TimeBaseOperationError:
-        raise
-    except httpx2.HTTPError as exc:
-        raise TimeBaseOperationError(str(exc)) from exc
-    except ValueError as exc:
-        raise TimeBaseOperationError(str(exc)) from exc
-    except Exception as exc:
-        raise TimeBaseOperationError(str(exc)) from exc
-    finally:
-        await runtime.operation_budget.release()
 
 
 def _raise_for_required_response(response: httpx2.Response, *, endpoint: str) -> None:
@@ -149,7 +103,7 @@ async def get_timebase_status(
     *,
     instance_key: str | None = None,
 ) -> TimeBaseStatus:
-    return await _run_monitor_operation(
+    return await run_http_with_runtime(
         runtime,
         _status_sync,
         instance_key=instance_key,
@@ -193,7 +147,7 @@ async def list_timebase_activity(
     kind: ActivityKind = "all",
     limit: int = 50,
 ) -> TimeBaseActivityList:
-    return await _run_monitor_operation(
+    return await run_http_with_runtime(
         runtime,
         lambda instance: _activity_list_sync(instance, kind=kind, limit=limit),
         instance_key=instance_key,
@@ -263,7 +217,7 @@ async def get_timebase_activity_detail(
     instrument_limit: int = 50,
     instrument_filter: str | None = None,
 ) -> TimeBaseActivityDetail:
-    return await _run_monitor_operation(
+    return await run_http_with_runtime(
         runtime,
         lambda instance: _activity_detail_sync(
             instance,

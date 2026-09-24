@@ -23,6 +23,7 @@ class TimeBaseRuntime:
     operation_budget: TimeBaseOperationBudget
     instances: dict[str, TimeBaseInstanceRuntime] = field(default_factory=dict)
     default_instance_key: str = DEFAULT_INSTANCE_KEY
+    http_operations: set[asyncio.Task] = field(default_factory=set, repr=False)
 
     @classmethod
     def from_settings(cls, settings: MCPSettings) -> TimeBaseRuntime:
@@ -83,6 +84,8 @@ class TimeBaseRuntime:
         return self.get_instance()
 
     async def aclose(self) -> None:
+        if self.http_operations:
+            await asyncio.gather(*self.http_operations, return_exceptions=True)
         if not self.instances:
             return
 

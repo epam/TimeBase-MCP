@@ -179,6 +179,7 @@ async def test_call_get_server_configuration_tool(
             '      "edition": null,\n'
             '      "outbound_auth_mode": "auto",\n'
             '      "http_url": null,\n'
+            '      "webadmin_url": null,\n'
             '      "read_only": false,\n'
             '      "dxapi_ssl_termination": false,\n'
             '      "dxapi_ssl_trust_all": false\n'
@@ -202,6 +203,7 @@ async def test_call_get_server_configuration_tool(
                 "edition": None,
                 "outbound_auth_mode": "auto",
                 "http_url": None,
+                "webadmin_url": None,
                 "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,
@@ -251,6 +253,7 @@ async def test_call_get_server_configuration_reports_all_timebase_instances(
             "edition": None,
             "outbound_auth_mode": "auto",
             "http_url": "https://prod.example/tb",
+            "webadmin_url": None,
             "read_only": False,
             "dxapi_ssl_termination": False,
             "dxapi_ssl_trust_all": False,
@@ -263,6 +266,7 @@ async def test_call_get_server_configuration_reports_all_timebase_instances(
             "edition": None,
             "outbound_auth_mode": "auto",
             "http_url": None,
+            "webadmin_url": None,
             "read_only": False,
             "dxapi_ssl_termination": False,
             "dxapi_ssl_trust_all": False,
@@ -324,6 +328,7 @@ async def test_call_get_server_configuration_tool_reports_detected_edition(
                 "edition": "community",
                 "outbound_auth_mode": "auto",
                 "http_url": None,
+                "webadmin_url": None,
                 "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,
@@ -364,6 +369,7 @@ async def test_call_get_server_configuration_tool_reports_enterprise_for_oauth2(
                 "edition": "enterprise",
                 "outbound_auth_mode": "oauth2_client_credentials",
                 "http_url": None,
+                "webadmin_url": None,
                 "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,
@@ -403,6 +409,7 @@ async def test_call_get_server_configuration_tool_sanitizes_url_credentials(
                 "edition": None,
                 "outbound_auth_mode": "basic",
                 "http_url": None,
+                "webadmin_url": None,
                 "read_only": False,
                 "dxapi_ssl_termination": False,
                 "dxapi_ssl_trust_all": False,

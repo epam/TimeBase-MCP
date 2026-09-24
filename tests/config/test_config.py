@@ -5,6 +5,7 @@ from pydantic import SecretStr, ValidationError
 
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
+from timebase_mcp.config.webadmin import WebAdminAuthConfig, WebAdminConfig
 from timebase_mcp.constants import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -26,9 +27,13 @@ def test_settings_use_defaults_when_environment_is_not_set() -> None:
     assert settings.tb_oauth2_scope is None
     assert settings.tb_oauth2_token_params is None
     assert settings.oauth2_config is None
-    assert settings.tb_username is None
     assert settings.uses_oauth2 is False
     assert settings.detected_edition is None
+    assert settings.webadmin.url is None
+    assert settings.webadmin.auth.username is None
+    assert settings.webadmin.auth.password is None
+    assert settings.webadmin.auth.client_id is None
+    assert settings.webadmin.auth.client_secret is None
     assert settings.transport == DEFAULT_TRANSPORT
     assert settings.host == DEFAULT_HOST
     assert settings.port == DEFAULT_PORT
@@ -94,6 +99,11 @@ def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv(SettingsEnv.MCP_MAX_CONCURRENT_OPS, "4")
     monkeypatch.setenv(SettingsEnv.MCP_MAX_IDLE_CLIENTS, "3")
     monkeypatch.setenv(SettingsEnv.MCP_OPERATION_TIMEOUT_SECONDS, "30")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_URL, "http://localhost:8099/")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_USERNAME, "webadmin-user")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_PASSWORD, "webadmin-password")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_CLIENT_ID, "web")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_CLIENT_SECRET, "secret")
 
     settings = MCPSettings()
 
@@ -109,6 +119,14 @@ def test_settings_parse_environment_values(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.max_concurrent_ops == 4
     assert settings.max_idle_clients == 3
     assert settings.operation_timeout_seconds == 30
+    server = settings.resolve_servers()[0]
+    assert server.webadmin.url == "http://localhost:8099"
+    assert server.webadmin.auth.username == "webadmin-user"
+    assert server.webadmin.auth.password is not None
+    assert server.webadmin.auth.password.get_secret_value() == "webadmin-password"
+    assert server.webadmin.auth.client_id == "web"
+    assert server.webadmin.auth.client_secret is not None
+    assert server.webadmin.auth.client_secret.get_secret_value() == "secret"
     assert settings.oauth2_config is None
     assert settings.uses_oauth2 is False
 
@@ -216,6 +234,7 @@ def test_settings_ignore_empty_environment_values(
     assert settings.tb_oauth2_client_secret is None
     assert settings.tb_oauth2_scope is None
     assert settings.tb_oauth2_token_params is None
+    assert settings.webadmin.url is None
     assert settings.transport == DEFAULT_TRANSPORT
     assert settings.host == DEFAULT_HOST
     assert settings.port == DEFAULT_PORT
@@ -805,6 +824,58 @@ def test_servers_indexed_env_supports_basic_auth(
     assert server.password.get_secret_value() == "secret"
 
 
+def test_servers_indexed_env_supports_separate_webadmin_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(SettingsEnv.TIMEBASE_SERVERS, raising=False)
+    prefix = f"{SettingsEnv.TIMEBASE_SERVERS}_0_"
+    monkeypatch.setenv(prefix + "URL", "dxtick://prod:8011")
+    monkeypatch.setenv(prefix + "WEBADMIN_URL", "http://webadmin:8099")
+    monkeypatch.setenv(prefix + "WEBADMIN_USERNAME", "webadmin-user")
+    monkeypatch.setenv(prefix + "WEBADMIN_PASSWORD", "webadmin-password")
+    monkeypatch.setenv(prefix + "WEBADMIN_CLIENT_ID", "custom-client")
+    monkeypatch.setenv(prefix + "WEBADMIN_CLIENT_SECRET", "custom-secret")
+
+    server = MCPSettings().resolve_servers()[0]
+
+    assert server.username is None
+    assert server.webadmin.auth.username == "webadmin-user"
+    assert server.webadmin.auth.password is not None
+    assert server.webadmin.auth.password.get_secret_value() == "webadmin-password"
+    assert server.webadmin.auth.client_id == "custom-client"
+    assert server.webadmin.auth.client_secret is not None
+    assert server.webadmin.auth.client_secret.get_secret_value() == "custom-secret"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "webadmin_username",
+        "webadmin_password",
+        "webadmin_client_id",
+        "webadmin_client_secret",
+    ],
+)
+@pytest.mark.parametrize("style", ["flat", "server", "indexed"])
+def test_webadmin_auth_requires_complete_pairs(
+    field: str, style: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(
+        ValidationError, match="must either both be set or both be unset"
+    ):
+        if style == "flat":
+            MCPSettings.model_validate({"tb_" + field: "configured"})
+        elif style == "server":
+            MCPSettings.model_validate(
+                {"servers": [{"url": "dxtick://localhost:8011", field: "configured"}]}
+            )
+        else:
+            monkeypatch.delenv(SettingsEnv.TIMEBASE_SERVERS, raising=False)
+            monkeypatch.setenv("TIMEBASE_SERVERS_0_URL", "dxtick://localhost:8011")
+            monkeypatch.setenv("TIMEBASE_SERVERS_0_" + field.upper(), "configured")
+            MCPSettings()
+
+
 def test_servers_indexed_env_stops_at_first_missing_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -967,3 +1038,127 @@ def test_runtime_applies_per_instance_read_only_without_default() -> None:
 
     assert runtime.instances["prod"].config.read_only is True
     assert runtime.instances["dev"].config.read_only is False
+
+
+@pytest.mark.parametrize("suffix", ["?key=value", "#fragment", "?", "#"])
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {},
+        {"webadmin_username": "user", "webadmin_password": "fixture"},
+        {"webadmin_api_key": "key", "webadmin_api_secret": "fixture"},
+    ],
+)
+def test_webadmin_base_url_rejects_query_and_fragment(suffix, credentials):
+    from timebase_mcp.config.servers import ServerConfig
+
+    fields = {
+        "webadmin_url": "https://webadmin.example/context" + suffix,
+        **credentials,
+    }
+    with pytest.raises(ValidationError, match="query or fragment"):
+        ServerConfig.model_validate({"url": "dxtick://localhost:8011", **fields})
+    with pytest.raises(ValidationError, match="query or fragment"):
+        MCPSettings.model_validate({"tb_" + k: v for k, v in fields.items()})
+    with pytest.raises(ValidationError, match="query or fragment"):
+        MCPSettings.model_validate(
+            {"servers": [{"url": "dxtick://localhost:8011", **fields}]}
+        )
+
+
+@pytest.mark.parametrize("suffix", ["?x=1", "#fragment"])
+def test_indexed_webadmin_url_rejects_query_and_fragment(monkeypatch, suffix):
+    monkeypatch.setenv("TIMEBASE_SERVERS_0_URL", "dxtick://localhost:8011")
+    monkeypatch.setenv(
+        "TIMEBASE_SERVERS_0_WEBADMIN_URL", "https://webadmin.example" + suffix
+    )
+    with pytest.raises(ValidationError, match="query or fragment"):
+        MCPSettings()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8099/",
+        "https://webadmin.example/context/",
+        "https://webadmin.example/context%3Fname/",
+    ],
+)
+def test_webadmin_base_url_preserves_valid_context_path(url):
+    settings = MCPSettings(webadmin=WebAdminConfig(url=url))
+    assert settings.resolve_servers()[0].webadmin.url == url.rstrip("/")
+
+
+def test_webadmin_config_is_reused_and_secrets_stay_redacted() -> None:
+    webadmin = WebAdminConfig(
+        url="http://localhost:8099/",
+        auth=WebAdminAuthConfig(
+            username="reader", password=SecretStr("composition-password")
+        ),
+    )
+    settings = MCPSettings(webadmin=webadmin)
+    assert settings.resolve_servers()[0].webadmin is webadmin
+    assert build_runtime(settings).get_instance().config.webadmin is webadmin
+    assert webadmin.url == "http://localhost:8099"
+    payload = settings.debug_log_payload()
+    assert payload["webadmin"] == webadmin.model_dump(mode="json")
+    assert "composition-password" not in str(payload)
+    with pytest.raises(ValidationError, match="frozen"):
+        webadmin.auth.username = "changed"
+
+
+@pytest.mark.parametrize("init_style", ["nested", "flat", "alias"])
+def test_webadmin_source_precedence(tmp_path, monkeypatch, init_style) -> None:
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "TIMEBASE_WEBADMIN_URL").write_text("http://secret-file:8099")
+    (secrets_dir / "TIMEBASE_WEBADMIN_USERNAME").write_text("secret-file-user")
+    (secrets_dir / "TIMEBASE_WEBADMIN_PASSWORD").write_text("secret-file-password")
+    (secrets_dir / "TIMEBASE_WEBADMIN_CLIENT_ID").write_text("secret-file-client")
+    (secrets_dir / "TIMEBASE_WEBADMIN_CLIENT_SECRET").write_text(
+        "secret-file-client-secret"
+    )
+    env_file = tmp_path / "settings.env"
+    env_file.write_text(
+        "TIMEBASE_WEBADMIN_URL=http://dotenv:8099\n"
+        "TIMEBASE_WEBADMIN_USERNAME=dotenv-user\n"
+        "TIMEBASE_WEBADMIN_PASSWORD=dotenv-password\n"
+    )
+    monkeypatch.setenv("TIMEBASE_WEBADMIN_URL", "http://environment:8099")
+    monkeypatch.setenv("TIMEBASE_WEBADMIN_USERNAME", "environment-user")
+    monkeypatch.setenv("TIMEBASE_WEBADMIN_PASSWORD", "")
+    inputs = {
+        "nested": {"webadmin": {"auth": {"username": "explicit-user"}}},
+        "flat": {"tb_webadmin_username": "explicit-user"},
+        "alias": {"TIMEBASE_WEBADMIN_USERNAME": "explicit-user"},
+    }
+    settings = MCPSettings.model_validate(
+        {"_env_file": env_file, "_secrets_dir": secrets_dir, **inputs[init_style]}
+    )
+    assert settings.webadmin == WebAdminConfig(
+        url="http://environment:8099",
+        auth=WebAdminAuthConfig(
+            username="explicit-user",
+            password=SecretStr("dotenv-password"),
+            client_id="secret-file-client",
+            client_secret=SecretStr("secret-file-client-secret"),
+        ),
+    )
+
+
+def test_servers_print_preserves_flat_webadmin_fields(tmp_path, capsys) -> None:
+    from timebase_mcp.config.servers import ServerConfig
+    from timebase_mcp.main import main
+
+    entry = {
+        "url": "dxtick://localhost:8011",
+        "webadmin_url": "http://localhost:8099",
+        "webadmin_auth_mode": "bearer_file",
+        "webadmin_token_file": "/tmp/token",
+    }
+    path = tmp_path / "servers.json"
+    path.write_text(json.dumps([entry]))
+    assert main(["servers-print", str(path)]) == 0
+    printed = json.loads(json.loads(capsys.readouterr().out))
+    assert printed == [{**entry, "auth_mode": "auto"}]
+    assert ServerConfig.model_validate(printed[0]) == ServerConfig.model_validate(entry)

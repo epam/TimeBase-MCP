@@ -4,6 +4,7 @@ import base64
 import hashlib
 import logging
 import secrets
+import socket
 import sys
 import threading
 import time
@@ -21,10 +22,9 @@ from timebase_mcp.auth.discovery import (
     resolve_interactive_endpoints,
 )
 from timebase_mcp.auth.oauth2 import (
-    TOKEN_REQUEST_TIMEOUT_SECONDS,
     OAuth2AccessTokenProvider,
     TokenResponse,
-    parse_json_token_response,
+    UrlLibTokenEndpointClient,
     parse_token_response,
     token_has_expired,
 )
@@ -80,6 +80,18 @@ def _parse_redirect_uri(redirect_uri: str) -> tuple[str, int, str]:
             f"Interactive OAuth redirect URI is missing a host: {redirect_uri!r}."
         )
 
+    if (
+        host not in {"localhost", "127.0.0.1"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or any(c.isspace() or ord(c) < 32 for c in redirect_uri)
+    ):
+        raise ConfigurationError(
+            "Interactive OAuth callback must be a local loopback URL without credentials, query or fragment."
+        )
+
     port = parsed.port if parsed.port is not None else 80
     path = parsed.path or "/"
     if not path.startswith("/"):
@@ -90,6 +102,14 @@ def _parse_redirect_uri(redirect_uri: str) -> tuple[str, int, str]:
 
 class _CallbackHTTPServer(HTTPServer):
     expected_path: str
+    expected_state: str
+
+    @override
+    def get_request(self) -> tuple[socket.socket, Any]:
+        connection, address = super().get_request()
+        connection.settimeout(1.0)
+        return connection, address
+
     received_query: dict[str, list[str]] | None
 
 
@@ -102,6 +122,10 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             return
 
         query = parse_qs(urlparse(self.path).query)
+        if query.get("state") != [server.expected_state]:
+            self.send_response(400)
+            self.end_headers()
+            return
         server.received_query = query
 
         success = "error" not in query and "code" in query
@@ -135,6 +159,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
         self,
         *,
         instance: TimeBaseInstanceRuntime | None = None,
+        resource_name: str = "TimeBase",
         client_id_override: str | None = None,
         scope_override: str | None = None,
         issuer_override: str | None = None,
@@ -143,12 +168,14 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
         monotonic: Callable[[], float] = time.monotonic,
         open_browser: Callable[[str], bool] = webbrowser.open,
     ) -> None:
+        self._resource_name = resource_name
         self._instance = instance
         self._client_id_override = client_id_override
         self._scope_override = scope_override
         self._issuer_override = issuer_override
         self._redirect_uri = redirect_uri
         self._login_timeout_seconds = login_timeout_seconds
+        self._token_endpoint = UrlLibTokenEndpointClient()
         self._monotonic = monotonic
         self._open_browser = open_browser
 
@@ -171,8 +198,9 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
                         return self._access_token
                 except (httpx2.HTTPError, ValueError, PermissionError) as exc:
                     logger.info(
-                        "Refreshing TimeBase token failed (%s); re-running login.",
-                        exc,
+                        "Refreshing %s token failed (%s); re-running login.",
+                        self._resource_name,
+                        type(exc).__name__,
                     )
 
             self._login()
@@ -214,6 +242,7 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
             ) from exc
 
         server.received_query = None
+        server.expected_state = state
         server.expected_path = urlparse(redirect_uri).path
 
         authorize_url = (
@@ -233,10 +262,12 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
         )
 
         logger.info(
-            "Starting interactive TimeBase login (redirect_uri=%s).", redirect_uri
+            "Starting interactive %s login (redirect_uri=%s).",
+            self._resource_name,
+            redirect_uri,
         )
         print(
-            "To authenticate with TimeBase, open this URL in your browser:\n"
+            f"To authenticate with {self._resource_name}, open this URL in your browser:\n"
             f"{authorize_url}\n"
             f"OAuth callback URI: {redirect_uri}",
             file=sys.stderr,
@@ -306,47 +337,26 @@ class InteractiveOAuthProvider(OAuth2AccessTokenProvider):
         }
         if endpoints.scope:
             data["scope"] = endpoints.scope
-        self._store_token(self._post_token(endpoints.token_endpoint, data))
-
-    def _post_token(self, token_endpoint: str, data: dict[str, Any]) -> TokenResponse:
-        try:
-            response = httpx2.post(
-                token_endpoint,
-                data=data,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                timeout=TOKEN_REQUEST_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-        except httpx2.HTTPStatusError as exc:
-            if exc.response.status_code in (400, 401, 403):
-                raise PermissionError(
-                    f"OAuth token request rejected: {exc.response.text}"
-                ) from exc
-            raise ConnectionError(f"OAuth token request failed: {exc}") from exc
-        except httpx2.HTTPError as exc:
-            raise ConnectionError(f"OAuth token request failed: {exc}") from exc
-
-        payload = parse_json_token_response(response.text)
-
-        return parse_token_response(
-            payload,
-            monotonic=self._monotonic,
-            access_token_error="OAuth token response did not include an access_token.",
+        self._store_token(
+            self._post_token(endpoints.token_endpoint, data),
+            preserve_refresh_token=True,
         )
 
-    def _store_token(self, token_response: TokenResponse | dict[str, Any]) -> None:
-        if isinstance(token_response, dict):
-            token_response = parse_token_response(
-                token_response,
-                monotonic=self._monotonic,
-                access_token_error="OAuth token response did not include an access_token.",
-            )
+    def _post_token(self, token_endpoint: str, data: dict[str, Any]) -> TokenResponse:
+        return parse_token_response(
+            self._token_endpoint.post_form(token_endpoint, data),
+            monotonic=self._monotonic,
+            access_token_error="OAuth2 token response did not include a valid access_token.",
+        )
 
+    def _store_token(
+        self,
+        token_response: TokenResponse,
+        *,
+        preserve_refresh_token: bool = False,
+    ) -> None:
         self._access_token = token_response.access_token
-        if token_response.refresh_token is not None:
+        if token_response.refresh_token is not None or not preserve_refresh_token:
             self._refresh_token = token_response.refresh_token
         self._expires_at_monotonic = token_response.expires_at_monotonic
 

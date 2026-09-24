@@ -15,6 +15,9 @@ Don't assume everything is available on the specific instance.
 Before querying: discover streams, read schema, then check time range and symbols.
 Sample messages only when you need raw examples.
 
+Use WebAdmin tools only for views, topics, background tasks, and existing
+order-book validation reports; prefer native TimeBase tools for stream data.
+
 For QQL: Always use the QQL generator skill, when it is available in the workspace.
 Otherwise, use compile_query first, then execute_query with a small limit.
 execute_query can be expensive, so keep queries narrow.

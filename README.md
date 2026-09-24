@@ -17,6 +17,7 @@ The server can run two ways:
 | Manual local setup | [Local setup](docs/local-setup.md) |
 | Deploy a shared remote MCP server | [Remote deployment](docs/remote-deployment.md) |
 | Connect to a running remote server | [Connect to a remote server](docs/connect-remote.md) |
+| Add optional WebAdmin inspection | [Add WebAdmin access](docs/webadmin-setup.md) |
 
 ## Documentation
 

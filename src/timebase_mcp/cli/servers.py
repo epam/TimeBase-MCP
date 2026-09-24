@@ -26,7 +26,17 @@ def servers_print(args: argparse.Namespace) -> int:
         print("Servers file must contain at least one server.", file=sys.stderr)
         return 1
 
-    payload = [server.model_dump(mode="json", exclude_none=True) for server in servers]
+    payload = []
+    for server in servers:
+        entry = server.model_dump(mode="json", exclude_none=True, exclude={"webadmin"})
+        if server.webadmin.url is not None:
+            entry["webadmin_url"] = server.webadmin.url
+        auth = server.webadmin.auth.model_dump(mode="json", exclude_none=True)
+        mode = auth.pop("mode")
+        if mode != "password":
+            entry["webadmin_auth_mode"] = mode
+        entry.update({"webadmin_" + key: value for key, value in auth.items()})
+        payload.append(entry)
     compact = json.dumps(payload, separators=(",", ":"))
     print(json.dumps(compact))
     return 0

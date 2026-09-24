@@ -2,7 +2,15 @@ from pydantic.fields import FieldInfo
 
 from timebase_mcp.config.urls import extract_timebase_url_credentials
 
-SECRET_FIELDS = frozenset({"tb_password", "tb_oauth2_client_secret"})
+SECRET_FIELDS = frozenset(
+    {
+        "tb_password",
+        "tb_oauth2_client_secret",
+        "tb_webadmin_password",
+        "tb_webadmin_api_secret",
+        "tb_webadmin_client_secret",
+    }
+)
 
 REDACTED_SECRET_VALUE = "**********"
 
@@ -44,5 +52,7 @@ def sanitize_env_log_payload(payload: dict[str, object]) -> dict[str, object]:
 
     if payload.get("servers"):
         payload["servers"] = REDACTED_SECRET_VALUE
+    if payload.get("webadmin"):
+        payload["webadmin"] = REDACTED_SECRET_VALUE
 
     return redact_log_payload(payload)

@@ -73,6 +73,6 @@ def create_server(settings: MCPSettings) -> MCPServer[TimeBaseRuntime]:
         auth=auth_settings,
         token_verifier=token_verifier,
     )
-    register_tools(mcp)
+    register_tools(mcp, runtime)
     register_resources(mcp, runtime)
     return mcp
