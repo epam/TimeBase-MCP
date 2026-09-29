@@ -12,7 +12,9 @@ from tests.stubs import StubPooledClient, StubTimeBaseClient
 from timebase_mcp.constants import DEFAULT_INSTANCE_KEY
 from timebase_mcp.models.core import StreamInfo
 
-LOCAL_TOOL_NAMES = frozenset({"list_timebase_instances", "get_server_configuration"})
+LOCAL_TOOL_NAMES = frozenset(
+    {"list_timebase_instances", "get_server_configuration", "search_logs_kb"}
+)
 
 
 class ResourceCatalogClient(StubTimeBaseClient):

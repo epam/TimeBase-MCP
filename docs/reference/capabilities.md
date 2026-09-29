@@ -32,6 +32,14 @@
 | `list_timebase_activity` | Active cursors, loaders, connections, and locks | optional `instance_key`, `kind`, `limit` |
 | `get_timebase_activity_detail` | Details for one cursor, loader, connection, or lock | `kind`, `id`, optional `instance_key`, instrument paging |
 
+### Log troubleshooting
+
+| Name | Description | Key inputs |
+| - | - | - |
+| `search_logs_kb` | Search bundled TimeBase troubleshooting cases by error text, stack trace, or log excerpt | `query` (non-empty), optional `limit` (default 5, minimum 1) |
+
+The tool does not connect to TimeBase. It returns ranked matches or an advice on improving the query. Each match includes a symptom signature and summary, root cause, suggested action, optional fix version, confidence and tags. Matches are troubleshooting leads, not a diagnosis of the current server.
+
 ### WebAdmin inspection
 
 These tools are advertised only when at least one instance has a WebAdmin URL configured.

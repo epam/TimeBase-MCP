@@ -95,5 +95,9 @@ markers = [
     "integration: tests that require a live TimeBase instance",
 ]
 
+[tool.uv.build-backend]
+module-root = "src"
+source-include = ["src/timebase_mcp/services/logs_kb/data/**/*.jsonl"]
+
 [project.scripts]
 timebase-mcp = "timebase_mcp.main:main"
