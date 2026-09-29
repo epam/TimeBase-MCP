@@ -323,14 +323,14 @@ def _build_query_features(
     idf: dict[str, float],
 ) -> _QueryFeatures:
     distinctive_tokens = tuple(
-        token
-        for token in query_tokens
-        if _is_distinctive_query_token(token, idf)
+        token for token in query_tokens if _is_distinctive_query_token(token, idf)
     )
     return _QueryFeatures(
         query_lower=query_text.lower(),
         distinctive_tokens=distinctive_tokens,
-        has_stack_frame=any(_looks_like_stack_frame(line) for line in query_text.splitlines()),
+        has_stack_frame=any(
+            _looks_like_stack_frame(line) for line in query_text.splitlines()
+        ),
     )
 
 
@@ -339,7 +339,9 @@ def _distinctive_token_coverage_boost(
     idf: dict[str, float],
     distinctive_tokens: tuple[str, ...],
 ) -> float:
-    return 2.0 * sum(idf.get(token, 1.0) for token in distinctive_tokens if token in doc_tokens)
+    return 2.0 * sum(
+        idf.get(token, 1.0) for token in distinctive_tokens if token in doc_tokens
+    )
 
 
 def _token_match_multiplier(
@@ -498,7 +500,9 @@ def _extract_log_level_and_body(line: str) -> tuple[str | None, str]:
 
     for level in _LOG_LEVELS:
         if stripped.startswith(level):
-            return level, _trim_log_body_prefix(stripped[len(level) :].lstrip()) or stripped
+            return level, _trim_log_body_prefix(
+                stripped[len(level) :].lstrip()
+            ) or stripped
 
         marker = f" {level}"
         start = stripped.find(marker)

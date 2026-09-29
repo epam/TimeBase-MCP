@@ -154,7 +154,9 @@ def test_search_entries_splits_single_line_container_logs() -> None:
     )
 
 
-def test_search_entries_prefers_license_matches_for_license_connectivity_query() -> None:
+def test_search_entries_prefers_license_matches_for_license_connectivity_query() -> (
+    None
+):
     entries = (
         RuntimeEntry(
             runtime_schema_version=1,
@@ -228,7 +230,9 @@ def test_search_entries_prefers_license_matches_for_license_connectivity_query()
     ]
 
 
-def test_search_entries_downranks_generic_exception_signatures_without_stack_frames() -> None:
+def test_search_entries_downranks_generic_exception_signatures_without_stack_frames() -> (
+    None
+):
     entries = (
         RuntimeEntry(
             runtime_schema_version=1,
