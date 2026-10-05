@@ -26,5 +26,6 @@ def build_auth_settings(
             if resource_server_url is not None
             else None
         ),
+        validate_token_resource=False,
         required_scopes=list(required_scopes) if required_scopes else None,
     )
