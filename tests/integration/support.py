@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import import_module
 from time import monotonic, sleep
 from typing import Any
@@ -55,7 +55,7 @@ class SeedBar:
 SEEDED_BARS = (
     SeedBar(
         symbol="AAPL",
-        timestamp=datetime(2024, 1, 2, 14, 30, tzinfo=timezone.utc),
+        timestamp=datetime(2024, 1, 2, 14, 30, tzinfo=UTC),
         open_price=187.25,
         close_price=188.5,
         high_price=189.1,
@@ -64,7 +64,7 @@ SEEDED_BARS = (
     ),
     SeedBar(
         symbol="MSFT",
-        timestamp=datetime(2024, 1, 2, 14, 31, tzinfo=timezone.utc),
+        timestamp=datetime(2024, 1, 2, 14, 31, tzinfo=UTC),
         open_price=372.0,
         close_price=373.5,
         high_price=374.2,
@@ -73,7 +73,7 @@ SEEDED_BARS = (
     ),
     SeedBar(
         symbol="AAPL",
-        timestamp=datetime(2024, 1, 2, 14, 32, tzinfo=timezone.utc),
+        timestamp=datetime(2024, 1, 2, 14, 32, tzinfo=UTC),
         open_price=188.6,
         close_price=189.0,
         high_price=189.4,
@@ -225,5 +225,5 @@ def _load_client_module(edition: Edition) -> Any:
 
 def _to_epoch_nanos(value: datetime) -> int:
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        value = value.replace(tzinfo=UTC)
     return int(value.timestamp() * 1_000_000_000)

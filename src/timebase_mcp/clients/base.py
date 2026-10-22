@@ -5,9 +5,9 @@ from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from datetime import datetime
 from types import TracebackType
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from typing_extensions import Self, override
+from typing_extensions import override
 
 from timebase_mcp.errors import TimeBaseOperationCancelledError
 from timebase_mcp.models.core import StreamInfo

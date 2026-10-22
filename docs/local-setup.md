@@ -4,7 +4,7 @@ Manual local `stdio` setup. For Cursor, VS Code, Claude Code or Desktop, [TimeBa
 
 ## 1. Install
 
-**Prerequisites:** Python 3.10–3.14 and one of [pip](https://pip.pypa.io/en/stable/installation/), [uv](https://docs.astral.sh/uv/getting-started/installation/), or [pipx](https://pipx.pypa.io/stable/how-to/install-pipx/).
+**Prerequisites:** Python 3.11–3.14 and one of [pip](https://pip.pypa.io/en/stable/installation/), [uv](https://docs.astral.sh/uv/getting-started/installation/), or [pipx](https://pipx.pypa.io/stable/how-to/install-pipx/).
 
 | Tool | Command |
 | - | - |

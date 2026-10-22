@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import Any, Literal
 
@@ -82,12 +82,12 @@ def message_timestamp(message: Any) -> datetime | None:
         return None
 
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-    return timestamp.astimezone(timezone.utc)
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return timestamp.astimezone(UTC)
 
 
 def timestamp_ms_to_datetime_utc(timestamp_ms: int) -> datetime:
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
 
 
 def parse_time_range_ms(

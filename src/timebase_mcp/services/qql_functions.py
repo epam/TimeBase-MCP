@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import zip_longest
 from typing import Any, Literal
 
@@ -267,8 +267,8 @@ def _json_safe_value(value: Any) -> Any:
         return value
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).isoformat()
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat()
     if isinstance(value, dict):
         return {str(key): _json_safe_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 
@@ -48,7 +48,7 @@ class _MessageWithToDict:
         return {"symbol": "AAPL", "price": 10.5}
 
     def getDateTime(self) -> datetime:
-        return datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        return datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)
 
 
 class _MessageWithVars:
@@ -89,7 +89,7 @@ def test_normalize_message_prefers_to_dict() -> None:
 
     assert payload["type"] == "_MessageWithToDict"
     assert payload["symbol"] == "AAPL"
-    assert payload["timestamp"] == datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    assert payload["timestamp"] == datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)
 
 
 def test_normalize_message_falls_back_to_vars() -> None:
@@ -99,7 +99,7 @@ def test_normalize_message_falls_back_to_vars() -> None:
 
     assert payload["type"] == "_MessageWithVars"
     assert payload["symbol"] == "MSFT"
-    assert payload["timestamp"] == datetime(2024, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+    assert payload["timestamp"] == datetime(2024, 2, 3, 4, 5, 6, tzinfo=UTC)
 
 
 def test_message_payload_and_timestamp_handle_missing_get_datetime() -> None:
@@ -121,8 +121,8 @@ def test_parse_time_range_ms_returns_none_for_empty_range() -> None:
 def test_parse_time_range_ms_converts_valid_millisecond_range() -> None:
     start, end = parse_time_range_ms("bars", [1_700_000_000_000, 1_700_000_060_000])
 
-    assert start == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
-    assert end == datetime(2023, 11, 14, 22, 14, 20, tzinfo=timezone.utc)
+    assert start == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
+    assert end == datetime(2023, 11, 14, 22, 14, 20, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
