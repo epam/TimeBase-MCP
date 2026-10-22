@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -58,8 +58,8 @@ class StreamServiceStubClient(StubTimeBaseClient):
             return None, None
         start_ms, end_ms = stream.time_range
         return (
-            datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc),
-            datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc),
+            datetime.fromtimestamp(start_ms / 1000, tz=UTC),
+            datetime.fromtimestamp(end_ms / 1000, tz=UTC),
         )
 
     @override
@@ -78,8 +78,8 @@ class StreamServiceStubClient(StubTimeBaseClient):
             return None, None
         start_ms, end_ms = time_range
         return (
-            datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc),
-            datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc),
+            datetime.fromtimestamp(start_ms / 1000, tz=UTC),
+            datetime.fromtimestamp(end_ms / 1000, tz=UTC),
         )
 
     @override
@@ -153,8 +153,8 @@ def test_get_stream_time_range_returns_utc_datetimes() -> None:
     result = stream_service.get_stream_time_range(client, "bars")
 
     assert result.stream_key == "bars"
-    assert result.start == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
-    assert result.end == datetime(2023, 11, 14, 22, 14, 20, tzinfo=timezone.utc)
+    assert result.start == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
+    assert result.end == datetime(2023, 11, 14, 22, 14, 20, tzinfo=UTC)
 
 
 def test_get_stream_spaces_reports_unsupported_when_dxapi_returns_none() -> None:
@@ -191,8 +191,8 @@ def test_get_stream_space_time_range_returns_utc_datetimes() -> None:
 
     assert result.stream_key == "bars"
     assert result.space == "blue"
-    assert result.start == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
-    assert result.end == datetime(2023, 11, 14, 22, 14, 20, tzinfo=timezone.utc)
+    assert result.start == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
+    assert result.end == datetime(2023, 11, 14, 22, 14, 20, tzinfo=UTC)
 
 
 def test_get_stream_messages_text_passes_space_to_reader() -> None:

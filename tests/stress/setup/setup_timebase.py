@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import dxapi_ce
 
@@ -103,7 +103,7 @@ def seed_stream(
 
 
 def generate_bars(*, rows: int, symbols: list[str]) -> Iterator[Bar]:
-    start = datetime(2024, 1, 2, 14, 30, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
     for index in range(rows):
         symbol = symbols[index % len(symbols)]
         base = 100.0 + (index % 10_000) * 0.01 + (index % len(symbols)) * 7.5
@@ -129,7 +129,7 @@ def execute_ddl(db, query: str) -> None:
 
 def to_epoch_nanos(value: datetime) -> int:
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        value = value.replace(tzinfo=UTC)
     return int(value.timestamp() * 1_000_000_000)
 
 
