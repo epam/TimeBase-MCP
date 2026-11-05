@@ -25,18 +25,12 @@ def register_resources(mcp: MCPServer, runtime: TimeBaseRuntime) -> None:
         "timebase://streams",
         name="stream_catalog",
         title="TimeBase Stream Catalog",
-        description="Resource listing streams and descriptions.",
+        description="First page of streams, continue through the list_streams tool.",
         mime_type="text/plain",
     )
     async def stream_catalog_resource() -> str:
-        streams = await _run_resource_operation(
-            lambda client: stream_service.list_streams(client)
-        )
-        if not streams:
-            return "No streams found."
-        return "\n".join(
-            f"{stream.key}: {stream.description or 'No description'}"
-            for stream in streams
+        return await _run_resource_operation(
+            lambda client: stream_service.get_stream_catalog_text(client)
         )
 
     @mcp.resource(
@@ -56,19 +50,13 @@ def register_resources(mcp: MCPServer, runtime: TimeBaseRuntime) -> None:
         "timebase://instances/{instance_key}/streams",
         name="instance_stream_catalog",
         title="TimeBase Instance Stream Catalog",
-        description="Resource listing streams and descriptions for one instance.",
+        description="First page of streams for one instance, continue through the list_streams tool.",
         mime_type="text/plain",
     )
     async def instance_stream_catalog_resource(instance_key: str) -> str:
-        streams = await _run_resource_operation(
-            lambda client: stream_service.list_streams(client),
+        return await _run_resource_operation(
+            lambda client: stream_service.get_stream_catalog_text(client),
             instance_key=instance_key,
-        )
-        if not streams:
-            return "No streams found."
-        return "\n".join(
-            f"{stream.key}: {stream.description or 'No description'}"
-            for stream in streams
         )
 
     @mcp.resource(

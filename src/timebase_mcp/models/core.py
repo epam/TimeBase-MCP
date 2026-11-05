@@ -40,6 +40,14 @@ class StreamInfo(BaseModel):
     description: str | None = None
 
 
+class StreamCatalog(BaseModel):
+    streams: list[StreamInfo] = Field(default_factory=list)
+    total_streams: int = 0
+    returned_count: int = 0
+    streams_changed_since_cursor: bool = False
+    next_cursor: str | None = None
+
+
 class StreamSchema(BaseModel):
     stream_key: str
     schema_text: str

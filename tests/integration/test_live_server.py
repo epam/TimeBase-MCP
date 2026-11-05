@@ -3,21 +3,17 @@ from __future__ import annotations
 import pytest
 from mcp.client import Client
 from mcp_types import TextContent, TextResourceContents
-from pydantic import TypeAdapter
 
 from tests.integration.support import SeededStream
 from timebase_mcp.models.core import (
     CompileQQLResult,
-    StreamInfo,
+    StreamCatalog,
     StreamSchema,
     StreamSymbols,
     StreamTimeRange,
 )
 
 pytestmark = pytest.mark.integration
-
-
-_LIST_STREAMS_ADAPTER = TypeAdapter(list[StreamInfo])
 
 
 def _tool_text(result) -> str:
@@ -34,48 +30,40 @@ def _resource_text(result) -> str:
     )
 
 
-def list_stream_infos(result) -> list[StreamInfo]:
-    structured_content = result.structured_content or []
-    if isinstance(structured_content, dict):
-        structured_content = structured_content.get("result", [])
-    return _LIST_STREAMS_ADAPTER.validate_python(structured_content)
-
-
-def _stream_schema(result) -> StreamSchema:
-    assert result.structured_content is not None
-    return StreamSchema.model_validate(result.structured_content)
-
-
-def _stream_time_range(result) -> StreamTimeRange:
-    assert result.structured_content is not None
-    return StreamTimeRange.model_validate(result.structured_content)
-
-
-def _stream_symbols(result) -> StreamSymbols:
-    assert result.structured_content is not None
-    return StreamSymbols.model_validate(result.structured_content)
-
-
-def _compile_query(result) -> CompileQQLResult:
-    assert result.structured_content is not None
-    return CompileQQLResult.model_validate(result.structured_content)
-
-
 @pytest.mark.anyio
-async def test_list_streams_and_stream_catalog_show_seeded_stream(
+@pytest.mark.usefixtures("seeded_catalog")
+async def test_list_streams_and_stream_catalog_show_the_same_first_page(
     client_session: Client,
-    seeded_stream: SeededStream,
 ) -> None:
     tool_result = await client_session.call_tool("list_streams", {})
-    tool_streams = list_stream_infos(tool_result)
-
     assert tool_result.is_error is False
-    assert any(stream.key == seeded_stream.stream_key for stream in tool_streams)
+    catalog = StreamCatalog.model_validate(tool_result.structured_content)
+    assert catalog.total_streams >= 2
+    assert catalog.returned_count == len(catalog.streams)
+    assert catalog.returned_count == min(100, catalog.total_streams)
+
+    first_result = await client_session.call_tool("list_streams", {"limit": 1})
+    assert first_result.is_error is False
+    first = StreamCatalog.model_validate(first_result.structured_content)
+    assert first.next_cursor is not None
+    second_result = await client_session.call_tool(
+        "list_streams", {"limit": 1, "cursor": first.next_cursor}
+    )
+    assert second_result.is_error is False
+    second = StreamCatalog.model_validate(second_result.structured_content)
+    assert first.returned_count == second.returned_count == 1
+    assert first.total_streams == second.total_streams == catalog.total_streams
+    assert first.streams + second.streams == catalog.streams[:2]
+    assert first.streams[0].key != second.streams[0].key
 
     resource_result = await client_session.read_resource("timebase://streams")
     resource_text = _resource_text(resource_result)
 
-    assert seeded_stream.stream_key in resource_text
+    expected_text = "\n".join(
+        f"{stream.key}: {stream.description or 'No description'}"
+        for stream in catalog.streams
+    )
+    assert resource_text.startswith(expected_text)
 
 
 @pytest.mark.anyio
@@ -87,9 +75,8 @@ async def test_stream_schema_tool_and_resource_return_ddl(
         "get_stream_schema",
         {"stream_key": seeded_stream.stream_key},
     )
-    stream_schema = _stream_schema(tool_result)
-
     assert tool_result.is_error is False
+    stream_schema = StreamSchema.model_validate(tool_result.structured_content)
     assert stream_schema.stream_key == seeded_stream.stream_key
     assert "DURABLE STREAM" in stream_schema.schema_text
     assert "BarMessage" in stream_schema.schema_text
@@ -112,9 +99,8 @@ async def test_stream_time_range_matches_seeded_window(
         "get_stream_time_range",
         {"stream_key": seeded_stream.stream_key},
     )
-    time_range = _stream_time_range(result)
-
     assert result.is_error is False
+    time_range = StreamTimeRange.model_validate(result.structured_content)
     assert time_range.stream_key == seeded_stream.stream_key
     assert time_range.start == seeded_stream.first_timestamp
     assert time_range.end == seeded_stream.last_timestamp
@@ -129,9 +115,8 @@ async def test_stream_symbols_are_paginated_deterministically(
         "get_stream_symbols",
         {"stream_key": seeded_stream.stream_key, "limit": 1},
     )
-    first_symbols = _stream_symbols(first_page)
-
     assert first_page.is_error is False
+    first_symbols = StreamSymbols.model_validate(first_page.structured_content)
     assert first_symbols.symbols == [seeded_stream.symbols[0]]
     assert first_symbols.returned_count == 1
     assert first_symbols.symbols_changed_since_cursor is False
@@ -145,9 +130,8 @@ async def test_stream_symbols_are_paginated_deterministically(
             "cursor": first_symbols.next_cursor,
         },
     )
-    second_symbols = _stream_symbols(second_page)
-
     assert second_page.is_error is False
+    second_symbols = StreamSymbols.model_validate(second_page.structured_content)
     assert second_symbols.symbols == [seeded_stream.symbols[1]]
     assert second_symbols.returned_count == 1
     assert second_symbols.next_cursor is None
@@ -211,8 +195,7 @@ async def test_compile_query_returns_compact_validation_result(
         "compile_query",
         {"query": query_text},
     )
-    compile_result = _compile_query(result)
-
     assert result.is_error is False
+    compile_result = CompileQQLResult.model_validate(result.structured_content)
     assert compile_result.valid is True
     assert compile_result.error is None

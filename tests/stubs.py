@@ -70,11 +70,15 @@ class StubTimeBaseClient(TimeBaseClient):
         raise NotImplementedError
 
     @override
-    def list_stream_symbols(self, stream: Any) -> list[str]:
+    def list_stream_symbols(
+        self, stream_key: str, offset: int, limit: int
+    ) -> tuple[int, list[str]]:
         raise NotImplementedError
 
     @override
-    def list_stream_infos(self) -> list[StreamInfo]:
+    def list_stream_infos(
+        self, offset: int, limit: int
+    ) -> tuple[int, list[StreamInfo]]:
         raise NotImplementedError
 
     @override

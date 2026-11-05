@@ -3,7 +3,7 @@ from mcp_types import ToolAnnotations
 from pydantic import Field
 
 from timebase_mcp.models.core import (
-    StreamInfo,
+    StreamCatalog,
     StreamSchema,
     StreamSpaces,
     StreamSpaceTimeRange,
@@ -29,11 +29,21 @@ def register_stream_tools(mcp: MCPServer) -> None:
     async def list_streams(
         ctx: Context[TimeBaseRuntime],
         instance_key: InstanceName = None,
-    ) -> list[StreamInfo]:
+        limit: int = Field(
+            default=100, ge=1, le=500, description="Maximum number of streams to return"
+        ),
+        cursor: str | None = Field(
+            default=None,
+            description="Cursor returned by the previous call",
+        ),
+    ) -> StreamCatalog:
         return await run_tool_operation(
             ctx,
-            lambda client: stream_service.list_streams(client),
+            lambda client: stream_service.list_streams(
+                client, limit=limit, cursor=cursor
+            ),
             instance_key=instance_key,
+            report_progress=True,
         )
 
     @mcp.tool(
@@ -138,13 +148,11 @@ def register_stream_tools(mcp: MCPServer) -> None:
             default=100,
             ge=1,
             le=500,
-            description="Maximum number of symbols to return in this page",
+            description="Maximum number of symbols to return",
         ),
         cursor: str | None = Field(
             default=None,
-            description=(
-                "Opaque cursor from a previous call's next_cursor; omit on first page"
-            ),
+            description="Cursor returned by the previous call",
         ),
     ) -> StreamSymbols:
         return await run_tool_operation(

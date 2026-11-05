@@ -6,7 +6,6 @@ from contextlib import AbstractAsyncContextManager
 import pytest
 from mcp.client import Client
 from mcp.shared.exceptions import MCPError
-from mcp_types import TextResourceContents
 
 from tests.server.helpers import (
     ResourceCatalogClient,
@@ -47,32 +46,11 @@ async def test_read_resources_return_expected_text(
             "timebase://instances/dev/streams/bars/schema"
         )
 
-    catalog_text = [
-        content.text
-        for content in catalog.contents
-        if isinstance(content, TextResourceContents)
-    ]
-    schema_text = [
-        content.text
-        for content in schema.contents
-        if isinstance(content, TextResourceContents)
-    ]
-    instance_catalog_text = [
-        content.text
-        for content in instance_catalog.contents
-        if isinstance(content, TextResourceContents)
-    ]
-    instance_schema_text = [
-        content.text
-        for content in instance_schema.contents
-        if isinstance(content, TextResourceContents)
-    ]
-
     assert selected_instances == [None, None, "dev", "dev"]
-    assert catalog_text == ["bars: desc:None"]
-    assert schema_text == ["schema:None:bars"]
-    assert instance_catalog_text == ["bars: desc:dev"]
-    assert instance_schema_text == ["schema:dev:bars"]
+    assert resource_text(catalog) == ["bars: desc:None"]
+    assert resource_text(schema) == ["schema:None:bars"]
+    assert resource_text(instance_catalog) == ["bars: desc:dev"]
+    assert resource_text(instance_schema) == ["schema:dev:bars"]
 
 
 @pytest.mark.anyio
@@ -118,49 +96,6 @@ async def test_read_unscoped_resource_requires_instance_key_when_multiple_instan
 
 
 @pytest.mark.anyio
-async def test_read_instance_scoped_resource_uses_selected_instance_when_multiple_instances(
-    monkeypatch: pytest.MonkeyPatch,
-    client_session_factory: Callable[
-        [MCPSettings | None],
-        AbstractAsyncContextManager[Client],
-    ],
-) -> None:
-    selected_instances: list[str | None] = []
-
-    async def run_resource(_runtime, operation, *, instance_key=None):
-        selected_instances.append(instance_key)
-
-        return operation(
-            ResourceCatalogClient(
-                instance_key=instance_key,
-                description=f"from {instance_key}",
-            )
-        )
-
-    monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
-    settings = MCPSettings.model_validate(
-        {
-            "servers": [
-                {"name": "prod", "url": "dxtick://prod:8011"},
-                {"name": "dev", "url": "dxtick://dev:8011"},
-            ]
-        }
-    )
-
-    async with client_session_factory(settings) as client_session:
-        catalog = await client_session.read_resource("timebase://instances/dev/streams")
-
-    catalog_text = [
-        content.text
-        for content in catalog.contents
-        if isinstance(content, TextResourceContents)
-    ]
-
-    assert selected_instances == ["dev"]
-    assert catalog_text == ["bars: from dev"]
-
-
-@pytest.mark.anyio
 async def test_read_instance_scoped_resource_supports_url_instance_key(
     monkeypatch: pytest.MonkeyPatch,
     client_session_factory: Callable[
@@ -173,12 +108,7 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
     async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
-        return operation(
-            ResourceCatalogClient(
-                instance_key=instance_key,
-                description=f"from {instance_key}",
-            )
-        )
+        return operation(ResourceCatalogClient(instance_key=instance_key))
 
     monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
     settings = MCPSettings.model_validate(
@@ -195,14 +125,8 @@ async def test_read_instance_scoped_resource_supports_url_instance_key(
             "timebase://instances/dxtick%3A%2F%2Fdev%3A8011/streams"
         )
 
-    catalog_text = [
-        content.text
-        for content in catalog.contents
-        if isinstance(content, TextResourceContents)
-    ]
-
     assert selected_instances == ["dxtick://dev:8011"]
-    assert catalog_text == ["bars: from dxtick://dev:8011"]
+    assert resource_text(catalog) == ["bars: desc:dxtick://dev:8011"]
 
 
 @pytest.mark.anyio
@@ -220,12 +144,7 @@ async def test_read_resource_template_params_are_decoded_once(
     async def run_resource(_runtime, operation, *, instance_key=None):
         selected_instances.append(instance_key)
 
-        return operation(
-            ResourceCatalogClient(
-                instance_key=instance_key,
-                description=f"from {instance_key}",
-            )
-        )
+        return operation(ResourceCatalogClient(instance_key=instance_key))
 
     monkeypatch.setattr(resources_module, "run_with_runtime", run_resource)
 
