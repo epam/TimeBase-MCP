@@ -7,8 +7,31 @@ from pydantic import ValidationError
 
 from timebase_mcp.auth import keystore
 from timebase_mcp.auth.inbound import build_inbound_auth
+from timebase_mcp.auth.settings import build_auth_settings
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://mcp.example.com",
+        "https://mcp.example.com/",
+        "https://mcp.example.com/mcp",
+        "https://mcp.example.com/mcp/",
+    ],
+)
+def test_auth_settings_preserve_configured_oauth_url_spelling(url: str) -> None:
+    auth = build_auth_settings(
+        issuer_url=url,
+        resource_server_url=url,
+        required_scopes=["https://mcp.example.com/mcp/mcp.access"],
+    )
+
+    assert str(auth.issuer_url) == url
+    assert str(auth.resource_server_url) == url
+    assert auth.validate_token_resource is False
+    assert auth.required_scopes == ["https://mcp.example.com/mcp/mcp.access"]
 
 
 def test_build_inbound_auth_disabled_returns_none() -> None:

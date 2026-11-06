@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Annotated
 
 from mcp.server.auth.settings import AuthSettings
-from pydantic import AnyHttpUrl, TypeAdapter
+from pydantic import AnyHttpUrl, TypeAdapter, UrlConstraints
 
-_HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
+_HTTP_URL_ADAPTER = TypeAdapter(
+    Annotated[AnyHttpUrl, UrlConstraints(preserve_empty_path=True)]
+)
 
 
 def _to_http_url(value: str) -> AnyHttpUrl:

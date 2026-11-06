@@ -81,5 +81,6 @@ def build_inbound_auth(
             issuer=resolved.issuer,
             audience=settings.auth_audience,
             required_scopes=required_scopes,
+            scope_aliases=settings.auth_scope_aliases,
         ),
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import jwt
@@ -11,6 +11,7 @@ from mcp.server.auth.provider import AccessToken, TokenVerifier
 from typing_extensions import override
 
 from timebase_mcp.auth.keystore import ApiKeyRecord, KeyStore, hash_key
+from timebase_mcp.auth.scopes import is_scope_token
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def decode_claims_unverified(token: str) -> dict[str, Any]:
 class JwksTokenVerifier(TokenVerifier):
     """Validate inbound JWT bearer tokens against an IdP's JWKS endpoint.
 
-    Verifies the signature, expiry and issuer and audience when configured,
+    Requires expiration and verifies the signature, issuer and configured audience,
     then maps the standard claims onto an ``AccessToken`` the MCP SDK can use.
     """
 
@@ -56,6 +57,7 @@ class JwksTokenVerifier(TokenVerifier):
         issuer: str,
         audience: str | None = None,
         required_scopes: Sequence[str] | None = None,
+        scope_aliases: Mapping[str, str] | None = None,
         algorithms: Iterable[str] = _DEFAULT_ALGORITHMS,
         client_id_claim: str = "azp",
     ) -> None:
@@ -63,6 +65,7 @@ class JwksTokenVerifier(TokenVerifier):
         self._issuer = issuer
         self._audience = audience
         self._required_scopes = list(required_scopes or [])
+        self._scope_aliases = dict(scope_aliases or {})
         self._algorithms = list(algorithms)
         self._client_id_claim = client_id_claim
 
@@ -82,15 +85,25 @@ class JwksTokenVerifier(TokenVerifier):
             algorithms=self._algorithms,
             audience=self._audience,
             issuer=self._issuer,
-            options={"verify_aud": self._audience is not None},
+            options={"verify_aud": self._audience is not None, "require": ["exp"]},
         )
 
         scopes = extract_scopes(claims)
-        if self._required_scopes and not set(self._required_scopes).issubset(scopes):
-            logger.debug(
-                "Inbound token missing required scopes %s.", self._required_scopes
-            )
-            return None
+        scp = claims.get("scp")
+        delegated_scopes = scp.split(" ") if isinstance(scp, str) else []
+        if not all(is_scope_token(scope) for scope in delegated_scopes):
+            delegated_scopes = []
+        for required in self._required_scopes:
+            alias = self._scope_aliases.get(required)
+            available = delegated_scopes if alias is not None else scopes
+            if (alias if alias is not None else required) not in available:
+                logger.debug("Inbound token missing required scope %s.", required)
+                return None
+
+        # SDK middleware checks advertised names, forwarding keeps the original JWT
+        for required in self._required_scopes:
+            if required in self._scope_aliases and required not in scopes:
+                scopes.append(required)
 
         subject = claims.get("sub")
         client_id = (

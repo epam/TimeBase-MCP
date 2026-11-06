@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import time
 
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
@@ -21,6 +23,20 @@ from timebase_mcp.auth.token_verifier import (
 )
 from timebase_mcp.config.env import SettingsEnv
 from timebase_mcp.config.settings import MCPSettings
+
+_MCP_SCOPE = "https://mcp.example.com/mcp/mcp.access"
+
+
+@pytest.fixture
+def jwt_claims() -> dict[str, object]:
+    return {
+        "iss": "https://idp.example",
+        "aud": "shared-api",
+        "sub": "user-1",
+        "azp": "mcp-client",
+        "preferred_username": "alice",
+        "exp": int(time()) + 3600,
+    }
 
 
 def test_required_scopes_normalization(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,6 +79,7 @@ async def test_jwks_verifier_accepts_valid_token() -> None:
             "azp": "mcp-client",
             "scope": "timebase.read",
             "preferred_username": "alice",
+            "exp": int(time()) + 3600,
         },
         private_key,
         algorithm="RS256",
@@ -80,7 +97,7 @@ async def test_jwks_verifier_accepts_valid_token() -> None:
 async def test_jwks_verifier_rejects_wrong_issuer() -> None:
     verifier, private_key = make_rsa_verifier(issuer="https://idp.example")
     token = jwt.encode(
-        {"iss": "https://evil.example", "sub": "user-1"},
+        {"iss": "https://evil.example", "sub": "user-1", "exp": int(time()) + 3600},
         private_key,
         algorithm="RS256",
     )
@@ -92,10 +109,186 @@ async def test_jwks_verifier_rejects_wrong_issuer() -> None:
 async def test_jwks_verifier_enforces_required_scopes() -> None:
     verifier, private_key = make_rsa_verifier(required_scopes=["timebase.write"])
     token = jwt.encode(
-        {"iss": "https://idp.example", "sub": "user-1", "scope": "timebase.read"},
+        {
+            "iss": "https://idp.example",
+            "sub": "user-1",
+            "scope": "timebase.read",
+            "exp": int(time()) + 3600,
+        },
         private_key,
         algorithm="RS256",
     )
+
+    assert await verifier.verify_token(token) is None
+
+
+@pytest.mark.anyio
+async def test_scope_alias_exposes_canonical_permission_without_changing_jwt(
+    jwt_claims: dict[str, object],
+) -> None:
+    verifier, private_key = make_rsa_verifier(
+        audience="shared-api",
+        required_scopes=[_MCP_SCOPE],
+        scope_aliases={_MCP_SCOPE: "mcp.access"},
+    )
+    jwt_claims.update({"scope": "legacy.read", "scp": "mcp.access another.permission"})
+    token = jwt.encode(jwt_claims, private_key, algorithm="RS256")
+
+    access = await verifier.verify_token(token)
+
+    assert access is not None
+    assert access.token == token
+    assert access.claims == jwt_claims
+    assert access.scopes == ["legacy.read", _MCP_SCOPE]
+    assert access.expires_at == jwt_claims["exp"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "scope_claims",
+    [
+        {},
+        {"scp": "other.permission"},
+        {"scp": ""},
+        {"scp": ["mcp.access"]},
+        {"scp": {"mcp.access": True}},
+        {"scp": 1},
+        {"scp": "mcp.access\tother.permission"},
+        {"scp": " mcp.access"},
+        {"scp": "mcp.access "},
+        {"scp": "mcp.access  other.permission"},
+        {"scp": 'mcp.access bad"permission'},
+        {"scope": _MCP_SCOPE},
+        {"roles": [_MCP_SCOPE]},
+        {"roles": ["mcp.access"]},
+        {"scope": _MCP_SCOPE, "scp": "other.permission"},
+        {"roles": [_MCP_SCOPE], "scp": "other.permission"},
+    ],
+)
+async def test_scope_alias_requires_original_delegated_string_claim(
+    jwt_claims: dict[str, object], scope_claims: dict[str, object]
+) -> None:
+    verifier, private_key = make_rsa_verifier(
+        audience="shared-api",
+        required_scopes=[_MCP_SCOPE],
+        scope_aliases={_MCP_SCOPE: "mcp.access"},
+    )
+    jwt_claims.update(scope_claims)
+    token = jwt.encode(jwt_claims, private_key, algorithm="RS256")
+
+    assert await verifier.verify_token(token) is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("scp", "generic_scope", "accepted"),
+    [
+        ("mcp.read", "legacy.read", False),
+        ("mcp.read mcp.write", "legacy.read", True),
+        ("mcp.read mcp.write", "other.permission", False),
+    ],
+)
+async def test_scope_aliases_require_all_mapped_and_unmapped_permissions(
+    jwt_claims: dict[str, object], scp: str, generic_scope: str, accepted: bool
+) -> None:
+    verifier, private_key = make_rsa_verifier(
+        required_scopes=["api/mcp.read", "api/mcp.write", "legacy.read"],
+        scope_aliases={"api/mcp.read": "mcp.read", "api/mcp.write": "mcp.write"},
+    )
+    jwt_claims.update({"scp": scp, "scope": generic_scope})
+    token = jwt.encode(jwt_claims, private_key, algorithm="RS256")
+
+    access = await verifier.verify_token(token)
+
+    assert (access is not None) is accepted
+    if access is not None:
+        assert access.scopes == ["legacy.read", "api/mcp.read", "api/mcp.write"]
+
+
+@pytest.mark.anyio
+async def test_scope_aliases_do_not_chain(jwt_claims: dict[str, object]) -> None:
+    verifier, private_key = make_rsa_verifier(
+        required_scopes=["scope.b", "scope.a"],
+        scope_aliases={"scope.b": "mcp.access", "scope.a": "scope.b"},
+    )
+    jwt_claims["scp"] = "mcp.access"
+    token = jwt.encode(jwt_claims, private_key, algorithm="RS256")
+
+    assert await verifier.verify_token(token) is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "scope_claims",
+    [{"scope": "legacy.read"}, {"scp": ["legacy.read"]}, {"roles": ["legacy.read"]}],
+)
+async def test_empty_scope_aliases_preserve_generic_claim_matching(
+    jwt_claims: dict[str, object], scope_claims: dict[str, object]
+) -> None:
+    verifier, private_key = make_rsa_verifier(
+        required_scopes=["legacy.read"], scope_aliases={}
+    )
+    jwt_claims.update(scope_claims)
+    token = jwt.encode(jwt_claims, private_key, algorithm="RS256")
+
+    access = await verifier.verify_token(token)
+
+    assert access is not None
+    assert access.scopes == ["legacy.read"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "invalid_claims",
+    [
+        {"iss": "https://other.example"},
+        {"aud": "another-api"},
+        {"exp": 0},
+        {"exp": None},
+    ],
+)
+async def test_scope_alias_does_not_bypass_jwt_validation(
+    jwt_claims: dict[str, object], invalid_claims: dict[str, object]
+) -> None:
+    verifier, private_key = make_rsa_verifier(
+        audience="shared-api",
+        required_scopes=[_MCP_SCOPE],
+        scope_aliases={_MCP_SCOPE: "mcp.access"},
+    )
+    jwt_claims.update({"scp": "mcp.access", **invalid_claims})
+    token = jwt.encode(jwt_claims, private_key, algorithm="RS256")
+
+    assert await verifier.verify_token(token) is None
+
+
+@pytest.mark.anyio
+async def test_scope_alias_does_not_bypass_signature_validation(
+    jwt_claims: dict[str, object],
+) -> None:
+    verifier, _ = make_rsa_verifier(
+        audience="shared-api",
+        required_scopes=[_MCP_SCOPE],
+        scope_aliases={_MCP_SCOPE: "mcp.access"},
+    )
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwt_claims["scp"] = "mcp.access"
+    token = jwt.encode(jwt_claims, other_key, algorithm="RS256")
+
+    assert await verifier.verify_token(token) is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("aliases", [{}, {_MCP_SCOPE: "mcp.access"}])
+async def test_jwks_verifier_requires_expiration(
+    jwt_claims: dict[str, object], aliases: dict[str, str]
+) -> None:
+    verifier, private_key = make_rsa_verifier(
+        required_scopes=[_MCP_SCOPE] if aliases else None,
+        scope_aliases=aliases,
+    )
+    jwt_claims.pop("exp")
+    jwt_claims["scp"] = "mcp.access"
+    token = jwt.encode(jwt_claims, private_key, algorithm="RS256")
 
     assert await verifier.verify_token(token) is None
 
@@ -136,6 +329,7 @@ async def test_api_key_verifier_accepts_valid_key(tmp_path: Path) -> None:
     assert access is not None
     assert access.subject == "alice"
     assert access.scopes == ["timebase.read"]
+    assert access.expires_at is None
     assert access.claims is not None
     assert access.claims["preferred_username"] == "alice"
 
