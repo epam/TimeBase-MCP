@@ -109,18 +109,16 @@ class TimeBaseClient(AbstractContextManager["TimeBaseClient"], ABC):
         """Returns the text for a stream schema."""
 
     @abstractmethod
-    def list_stream_symbols(self, stream: Any) -> list[str]:
-        """Returns stream symbols/entities in adapter-native order.
-
-        Deterministic sorting is owned by services.streams.
-        """
+    def list_stream_symbols(
+        self, stream_key: str, offset: int, limit: int
+    ) -> tuple[int, list[str]]:
+        """Return the total count and selected symbols."""
 
     @abstractmethod
-    def list_stream_infos(self) -> list[StreamInfo]:
-        """Returns available streams in adapter-native order.
-
-        Deterministic sorting is owned by services.streams.
-        """
+    def list_stream_infos(
+        self, offset: int, limit: int
+    ) -> tuple[int, list[StreamInfo]]:
+        """Return the total count and selected stream keys and descriptions."""
 
     @abstractmethod
     def get_stream_time_range(

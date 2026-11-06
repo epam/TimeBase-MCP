@@ -136,7 +136,9 @@ def seed_bars_stream(
 
     db.open(False)
     try:
-        _execute_ddl(db, f'DROP STREAM IF EXISTS "{stream_key}"')
+        existing_stream = db.getStream(stream_key)
+        if existing_stream is not None:
+            existing_stream.deleteStream()
         _execute_ddl(db, STREAM_DDL_TEMPLATE.format(stream_key=stream_key))
 
         stream = db.getStream(stream_key)

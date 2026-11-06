@@ -18,21 +18,16 @@ LOCAL_TOOL_NAMES = frozenset(
 
 
 class ResourceCatalogClient(StubTimeBaseClient):
-    def __init__(
-        self,
-        *,
-        instance_key: str | None,
-        description: str | None = None,
-    ) -> None:
+    def __init__(self, *, instance_key: str | None) -> None:
         super().__init__()
         self._instance_key = instance_key
-        self._description = (
-            description if description is not None else f"desc:{instance_key}"
-        )
 
     @override
-    def list_stream_infos(self) -> list[StreamInfo]:
-        return [StreamInfo(key="bars", description=self._description)]
+    def list_stream_infos(
+        self, offset: int, limit: int
+    ) -> tuple[int, list[StreamInfo]]:
+        streams = [StreamInfo(key="bars", description=f"desc:{self._instance_key}")]
+        return len(streams), streams[offset : offset + limit]
 
     @override
     def get_stream(self, stream_key: str) -> str:

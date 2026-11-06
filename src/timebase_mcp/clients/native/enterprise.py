@@ -13,6 +13,8 @@ from timebase_mcp.clients.native.common import (
     connection_error_hint,
     normalize_message,
     parse_time_range_ms,
+    read_stream_infos,
+    read_stream_symbols,
 )
 from timebase_mcp.constants import APP_NAME
 from timebase_mcp.errors import (
@@ -119,20 +121,43 @@ class EnterpriseTimeBaseClient(TimeBaseClient):
         return self._db
 
     @override
-    def list_stream_infos(self) -> list[StreamInfo]:
-        streams = self.require_db().listStreams()
-        return [
-            StreamInfo(key=stream.key(), description=stream.description())
-            for stream in streams
-        ]
+    def list_stream_infos(
+        self, offset: int, limit: int
+    ) -> tuple[int, list[StreamInfo]]:
+        self.raise_if_cancelled()
+        db = self.require_db()
+        assert dxapi is not None
+        result = read_stream_infos(
+            db,
+            offset,
+            limit,
+            dxapi.QueryParameter,
+            check_cancelled=self.raise_if_cancelled,
+        )
+        self._rows_read = 1
+        return result
 
     @override
     def get_stream_schema_text(self, stream: dxapi_types.TickStream) -> str:
         return stream.describe()
 
     @override
-    def list_stream_symbols(self, stream: dxapi_types.TickStream) -> list[str]:
-        return list[str](stream.listSymbols())
+    def list_stream_symbols(
+        self, stream_key: str, offset: int, limit: int
+    ) -> tuple[int, list[str]]:
+        self.raise_if_cancelled()
+        db = self.require_db()
+        assert dxapi is not None
+        result = read_stream_symbols(
+            db,
+            stream_key,
+            offset,
+            limit,
+            dxapi.QueryParameter,
+            check_cancelled=self.raise_if_cancelled,
+        )
+        self._rows_read = 1
+        return result
 
     @override
     def get_stream_time_range(

@@ -2,38 +2,44 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from contextlib import closing as _closing
 from datetime import UTC, datetime
-from types import TracebackType
-from typing import Any, Literal
+from typing import Any
 
-from typing_extensions import override
+from pydantic import BaseModel, Field
 
 from timebase_mcp.config.types import Edition
-from timebase_mcp.errors import InvalidStreamTimeRangeError
+from timebase_mcp.errors import InvalidStreamTimeRangeError, StreamNotFoundError
+from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
+
+STREAMS_QUERY = (
+    "WITH streams() AS 'raw', "
+    "raw[range(LO, min(HI, size(raw)))] AS 'selected' "
+    "SELECT size(raw) AS 'total', selected.key AS 'keys', "
+    "selected.description AS 'descriptions'"
+)
+SYMBOLS_QUERY = (
+    "WITH symbols(SK) AS 'raw' SELECT size(raw) AS 'total', "
+    "sort(raw)[range(LO, min(HI, size(raw)))] AS 'symbols'"
+)
+
+
+class _StreamsResult(BaseModel):
+    total: int = Field(ge=0)
+    keys: list[str] | None = None
+    descriptions: list[str | None] | None = None
+
+
+class _StreamSymbolsResult(BaseModel):
+    total: int = Field(ge=0)
+    symbols: list[str] | None = None
 
 
 def closing(cursor: Any) -> AbstractContextManager[Any]:
-    close = getattr(cursor, "close", None)
-    if not callable(close):
+    if not callable(getattr(cursor, "close", None)):
         raise TypeError("Cursor object does not provide close().")
-
-    class CursorContext(AbstractContextManager[Any]):
-        @override
-        def __enter__(self) -> Any:
-            return cursor
-
-        @override
-        def __exit__(
-            self,
-            exc_type: type[BaseException] | None,
-            exc: BaseException | None,
-            tb: TracebackType | None,
-        ) -> Literal[False]:
-            close()
-            return False
-
-    return CursorContext()
+    return _closing(cursor)
 
 
 def call_cursor_context(
@@ -70,6 +76,96 @@ def message_payload(message: Any) -> dict[str, Any]:
             return {str(key): value for key, value in raw_payload.items()}
 
     return dict(vars(message))
+
+
+def read_stream_infos(
+    db: Any,
+    offset: int,
+    limit: int,
+    parameter_factory: Callable[[str, str, str], Any],
+    *,
+    check_cancelled: Callable[[], None],
+) -> tuple[int, list[StreamInfo]]:
+    _validate_metadata_bounds(offset, limit)
+    check_cancelled()
+    with call_cursor_context(
+        db.executeQuery,
+        STREAMS_QUERY,
+        params=[
+            parameter_factory("LO", "INTEGER", str(offset)),
+            parameter_factory("HI", "INTEGER", str(offset + limit)),
+        ],
+    ) as cursor:
+        has_result = cursor.next()
+        check_cancelled()
+        if not has_result:
+            raise ValueError("QQL stream query returned no result.")
+
+        result = _StreamsResult.model_validate(
+            message_payload(cursor.getMessage()), strict=True
+        )
+        keys = result.keys or []
+        descriptions = result.descriptions or []
+        expected_count = min(limit, max(0, result.total - offset))
+        if len(keys) != expected_count or len(descriptions) != expected_count:
+            raise ValueError("QQL returned an unexpected number of streams.")
+
+        streams = [
+            StreamInfo(key=key, description=description)
+            for key, description in zip(keys, descriptions, strict=True)
+        ]
+        check_cancelled()
+        return result.total, streams
+
+
+def _validate_metadata_bounds(offset: int, limit: int) -> None:
+    if (
+        type(offset) is not int
+        or type(limit) is not int
+        or not 1 <= limit <= 500
+        or not 0 <= offset <= 2**31 - 1 - limit
+    ):
+        raise ValueError("Invalid metadata bounds.")
+
+
+def read_stream_symbols(
+    db: Any,
+    stream_key: str,
+    offset: int,
+    limit: int,
+    parameter_factory: Callable[[str, str, str], Any],
+    *,
+    check_cancelled: Callable[[], None],
+) -> tuple[int, list[str]]:
+    _validate_metadata_bounds(offset, limit)
+    check_cancelled()
+
+    with call_cursor_context(
+        db.executeQuery,
+        SYMBOLS_QUERY,
+        params=[
+            parameter_factory("SK", "VARCHAR", stream_key),
+            parameter_factory("LO", "INTEGER", str(offset)),
+            parameter_factory("HI", "INTEGER", str(offset + limit)),
+        ],
+    ) as cursor:
+        has_result = cursor.next()
+        check_cancelled()
+        if not has_result:
+            raise ValueError("QQL symbol query returned no result.")
+
+        payload = message_payload(cursor.getMessage())
+        if payload.get("total") is None:
+            raise StreamNotFoundError(stream_key)
+
+        result = _StreamSymbolsResult.model_validate(payload, strict=True)
+
+        symbols = result.symbols or []
+        if len(symbols) != min(limit, max(0, result.total - offset)):
+            raise ValueError("QQL returned an unexpected number of symbols.")
+
+        check_cancelled()
+        return result.total, symbols
 
 
 def message_timestamp(message: Any) -> datetime | None:
