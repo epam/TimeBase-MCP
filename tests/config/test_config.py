@@ -1107,6 +1107,114 @@ def test_webadmin_config_is_reused_and_secrets_stay_redacted() -> None:
         webadmin.auth.username = "changed"
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (
+            (
+                "https://reader:diagnostic-password@monitor.example/context"
+                "?token=diagnostic-query#diagnostic-fragment"
+            ),
+            "https://monitor.example/context",
+        ),
+        (
+            (
+                "https://reader:diagnostic-password@[::1]:8021/context"
+                "?token=diagnostic-query#diagnostic-fragment"
+            ),
+            "https://[::1]:8021/context",
+        ),
+        ("https://reader:diagnostic-password@", "**********"),
+        ("https://[diagnostic-password", "**********"),
+        (
+            "https://reader:123/diagnostic-password@monitor.example/context",
+            "**********",
+        ),
+    ],
+)
+def test_debug_payload_sanitizes_urls_without_changing_settings(
+    url: str, expected: str
+) -> None:
+    settings = MCPSettings(tb_http_url=url)
+
+    payload = settings.debug_log_payload()
+
+    assert payload["tb_http_url"] == expected
+    assert "diagnostic-password" not in json.dumps(payload)
+    assert "diagnostic-query" not in json.dumps(payload)
+    assert "diagnostic-fragment" not in json.dumps(payload)
+    assert settings.tb_http_url == url
+    assert settings.resolve_servers()[0].http_base_url == url
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (
+            "dxctick://host1:8010|host2:8011",
+            "dxctick://host1:8010|host2:8011",
+        ),
+        (
+            "dsctick://[::1]:8010|[::2]:8011",
+            "dsctick://[::1]:8010|[::2]:8011",
+        ),
+        ("dxctick://host1:8010|host2:invalid-port", "**********"),
+    ],
+)
+def test_debug_payload_sanitizes_native_cluster_urls(url: str, expected: str) -> None:
+    settings = MCPSettings(tb_url=url)
+
+    assert settings.debug_log_payload()["tb_url"] == expected
+    assert settings.tb_url == url
+
+
+def test_debug_payload_redacts_oauth2_token_params() -> None:
+    token_params = {"client_assertion": "token-parameter-secret"}
+    settings = MCPSettings(
+        tb_oauth2_token_url="https://idp.example/token",
+        tb_oauth2_client_id="client",
+        tb_oauth2_client_secret=SecretStr("client-secret"),
+        tb_oauth2_token_params=token_params,
+    )
+
+    for configuration in (settings, MCPSettings(servers=settings.resolve_servers())):
+        assert "token-parameter-secret" not in json.dumps(
+            configuration.debug_log_payload()
+        )
+        assert configuration.resolve_servers()[0].oauth2_token_params == token_params
+
+
+def test_debug_payload_sanitizes_nested_urls_without_changing_settings() -> None:
+    from timebase_mcp.config.servers import ServerConfig
+
+    native_url = "dxtick://timebase.example:8011?token=native-query#native-fragment"
+    http_url = (
+        "https://reader:nested-password@monitor.example/context"
+        "?token=nested-query#nested-fragment"
+    )
+    webadmin = WebAdminConfig(url="https://webadmin.example/context")
+    server = ServerConfig(url=native_url, http_base_url=http_url, webadmin=webadmin)
+    settings = MCPSettings(servers=[server])
+
+    payload = settings.debug_log_payload()
+    serialized = json.dumps(payload)
+
+    assert "dxtick://timebase.example:8011" in serialized
+    assert "https://monitor.example/context" in serialized
+    assert "https://webadmin.example/context" in serialized
+    for secret in (
+        "nested-password",
+        "nested-query",
+        "nested-fragment",
+        "native-query",
+        "native-fragment",
+    ):
+        assert secret not in serialized
+    assert settings.resolve_servers()[0].url == native_url
+    assert settings.resolve_servers()[0].http_base_url == http_url
+    assert settings.resolve_servers()[0].webadmin is webadmin
+
+
 @pytest.mark.parametrize("init_style", ["nested", "flat", "alias"])
 def test_webadmin_source_precedence(tmp_path, monkeypatch, init_style) -> None:
     secrets_dir = tmp_path / "secrets"

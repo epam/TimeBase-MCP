@@ -1,11 +1,16 @@
 from pydantic.fields import FieldInfo
 
-from timebase_mcp.config.urls import extract_timebase_url_credentials
+from timebase_mcp.config.urls import (
+    extract_timebase_url_credentials,
+    sanitize_url_for_log,
+)
 
 SECRET_FIELDS = frozenset(
     {
         "tb_password",
         "tb_oauth2_client_secret",
+        "tb_oauth2_token_params",
+        "oauth2_token_params",
         "tb_webadmin_password",
         "tb_webadmin_api_secret",
         "tb_webadmin_client_secret",
@@ -32,6 +37,18 @@ def redact_log_payload(payload: dict[str, object]) -> dict[str, object]:
     for secret_field in SECRET_FIELDS:
         if payload.get(secret_field) is not None:
             payload[secret_field] = REDACTED_SECRET_VALUE
+
+    for name, value in payload.items():
+        if isinstance(value, str) and (
+            name == "url" or name.endswith(("_url", "_uri"))
+        ):
+            payload[name] = sanitize_url_for_log(value)
+        elif isinstance(value, dict):
+            redact_log_payload(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    redact_log_payload(item)
 
     return payload
 

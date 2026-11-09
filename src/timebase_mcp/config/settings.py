@@ -83,6 +83,7 @@ class MCPSettings(BaseSettings):
         env_ignore_empty=True,
         extra="ignore",
         populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
     tb_url: str = Field(

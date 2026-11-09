@@ -67,18 +67,21 @@ def resolve_interactive_redirect_uri(*, host: str, port: int) -> str:
 
 
 def _parse_redirect_uri(redirect_uri: str) -> tuple[str, int, str]:
-    parsed = urlparse(redirect_uri)
+    try:
+        parsed = urlparse(redirect_uri)
+        host = parsed.hostname
+        port = parsed.port if parsed.port is not None else 80
+    except ValueError:
+        raise ConfigurationError(
+            "Interactive OAuth redirect URI has an invalid host or port."
+        ) from None
     if parsed.scheme != "http":
         raise ConfigurationError(
-            "Interactive OAuth redirect URI must use the http scheme for loopback "
-            f"login (got {redirect_uri!r})."
+            "Interactive OAuth redirect URI must use the http scheme for loopback login."
         )
 
-    host = parsed.hostname
     if host is None or not host:
-        raise ConfigurationError(
-            f"Interactive OAuth redirect URI is missing a host: {redirect_uri!r}."
-        )
+        raise ConfigurationError("Interactive OAuth redirect URI is missing a host.")
 
     if (
         host not in {"localhost", "127.0.0.1"}
@@ -92,7 +95,6 @@ def _parse_redirect_uri(redirect_uri: str) -> tuple[str, int, str]:
             "Interactive OAuth callback must be a local loopback URL without credentials, query or fragment."
         )
 
-    port = parsed.port if parsed.port is not None else 80
     path = parsed.path or "/"
     if not path.startswith("/"):
         path = f"/{path}"
