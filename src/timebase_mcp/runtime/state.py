@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
+import anyio
+
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.constants import (
     DEFAULT_INSTANCE_KEY,
@@ -24,6 +26,9 @@ class TimeBaseRuntime:
     instances: dict[str, TimeBaseInstanceRuntime] = field(default_factory=dict)
     default_instance_key: str = DEFAULT_INSTANCE_KEY
     http_operations: set[asyncio.Task] = field(default_factory=set, repr=False)
+    interrupt_limiter: anyio.CapacityLimiter = field(
+        default_factory=lambda: anyio.CapacityLimiter(1), init=False, repr=False
+    )
 
     @classmethod
     def from_settings(cls, settings: MCPSettings) -> TimeBaseRuntime:

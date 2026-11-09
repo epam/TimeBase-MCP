@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 import anyio
+from anyio.to_thread import run_sync
 from mcp.server.mcpserver import Context
 
 from timebase_mcp.auth.principal import current_principal
@@ -95,6 +96,7 @@ async def run_with_runtime(
                 release_lease_in_background = _begin_stop(
                     lease,
                     operation_future,
+                    interrupt_limiter=runtime.interrupt_limiter,
                     instance_key=instance.key,
                     reason="operation timeout",
                 )
@@ -117,6 +119,7 @@ async def run_with_runtime(
             release_lease_in_background = _begin_stop(
                 lease,
                 operation_future,
+                interrupt_limiter=runtime.interrupt_limiter,
                 instance_key=instance.key,
                 reason="client cancellation",
             )
@@ -220,6 +223,7 @@ def _begin_stop(
     lease: TimeBaseConnectionLease[TimeBaseClient],
     operation_future: asyncio.Future[ResultT],
     *,
+    interrupt_limiter: anyio.CapacityLimiter,
     instance_key: str,
     reason: str,
 ) -> bool:
@@ -242,6 +246,7 @@ def _begin_stop(
         _finalize_stopped_operation(
             operation_future,
             lease,
+            interrupt_limiter=interrupt_limiter,
             instance_key=instance_key,
             reason=reason,
         )
@@ -253,6 +258,7 @@ async def _finalize_stopped_operation(
     operation_future: asyncio.Future[ResultT],
     lease: TimeBaseConnectionLease[TimeBaseClient],
     *,
+    interrupt_limiter: anyio.CapacityLimiter,
     instance_key: str,
     reason: str,
 ) -> None:
@@ -270,6 +276,7 @@ async def _finalize_stopped_operation(
             await _escalate_to_interrupt(
                 operation_future,
                 lease,
+                interrupt_limiter=interrupt_limiter,
                 instance_key=instance_key,
                 reason=reason,
             )
@@ -301,6 +308,7 @@ async def _escalate_to_interrupt(
     operation_future: asyncio.Future[ResultT],
     lease: TimeBaseConnectionLease[TimeBaseClient],
     *,
+    interrupt_limiter: anyio.CapacityLimiter,
     instance_key: str,
     reason: str,
 ) -> None:
@@ -314,7 +322,8 @@ async def _escalate_to_interrupt(
     )
 
     try:
-        await asyncio.to_thread(lease.client.interrupt)
+        # Interrupts must not wait behind blocked operations or log searches.
+        await run_sync(lease.client.interrupt, limiter=interrupt_limiter)
     except Exception as exc:
         logger.warning(
             "Failed to interrupt TimeBase operation for instance %s: %s",

@@ -31,7 +31,7 @@ def register_logs_kb_tools(mcp: MCPServer) -> None:
         ctx: Context[TimeBaseRuntime],
         query: str = Field(
             max_length=MAX_RAW_QUERY_CHARACTERS,
-            description="Raw log text, stack trace, or error excerpt to search for."
+            description="Raw log text, stack trace, or error excerpt to search for.",
         ),
         limit: int = Field(
             default=5,

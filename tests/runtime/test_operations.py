@@ -4,8 +4,10 @@ import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
+import anyio.to_thread
 import pytest
 from typing_extensions import override
 
@@ -20,11 +22,18 @@ from timebase_mcp.errors import (
     TimeBaseOperationStateError,
     TimeBaseOperationTimeoutError,
 )
+from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 from timebase_mcp.runtime.operations import run_http_with_runtime, run_with_runtime
 from timebase_mcp.runtime.pool import TimeBaseConnectionPool, TimeBaseOperationBudget
 from timebase_mcp.runtime.state import build_runtime
 
 _ASYNCIO_WAIT_FOR = asyncio.wait_for
+
+
+def _single_worker_loop() -> asyncio.AbstractEventLoop:
+    loop = asyncio.new_event_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+    return loop
 
 
 @pytest.mark.anyio
@@ -997,6 +1006,84 @@ async def test_run_with_runtime_cancel_escalates_to_interrupt_when_uncooperative
     )
 
     await _with_timeout(runtime.aclose(), "Runtime close did not finish.")
+
+
+@pytest.mark.parametrize("stop", ["cancel", "timeout"])
+@pytest.mark.parametrize(
+    "anyio_backend",
+    [("asyncio", {"loop_factory": _single_worker_loop})],
+    ids=["single-worker"],
+)
+@pytest.mark.anyio
+async def test_run_with_runtime_interrupts_when_worker_pools_are_saturated(
+    monkeypatch: pytest.MonkeyPatch, anyio_backend: object, stop: str
+) -> None:
+    created_clients: list[StubClient] = []
+    operation_started = threading.Event()
+    anyio_started = threading.Event()
+    release_anyio = threading.Event()
+
+    def build_client(instance: TimeBaseInstanceRuntime) -> StubClient:
+        client = StubClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    def blocked_operation(client: TimeBaseClient) -> int:
+        operation_started.set()
+        _wait_for_test_release(cast(StubClient, client).closed_event)
+        return id(client)
+
+    def occupy_anyio_worker() -> None:
+        anyio_started.set()
+        _wait_for_test_release(release_anyio)
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+    monkeypatch.setattr(operations_module, "_COOPERATIVE_STOP_GRACE_SECONDS", 0.01)
+    runtime = build_runtime(
+        MCPSettings(
+            operation_timeout_seconds=1 if stop == "timeout" else 0,
+            max_concurrent_ops=1,
+        )
+    )
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    previous_tokens = limiter.total_tokens
+    limiter.total_tokens = 1
+    anyio_task = asyncio.create_task(anyio.to_thread.run_sync(occupy_anyio_worker))
+    operation_task = asyncio.create_task(run_with_runtime(runtime, blocked_operation))
+
+    try:
+        await _wait_for_thread_event(anyio_started, "AnyIO worker did not start.")
+        await _wait_for_thread_event(operation_started, "Native worker did not start.")
+        if stop == "cancel":
+            operation_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await operation_task
+        else:
+            with pytest.raises(TimeBaseOperationTimeoutError):
+                await operation_task
+
+        await _wait_until(
+            lambda: created_clients[0].interrupt_calls == 1,
+            "Hard interrupt did not run while both worker pools were saturated.",
+        )
+        next_client_id = await _run_when_budget_is_released(runtime)
+        assert next_client_id != id(created_clients[0])
+        assert created_clients[0].close_calls == 1
+    finally:
+        limiter.total_tokens = previous_tokens
+        release_anyio.set()
+        for client in created_clients:
+            client.closed_event.set()
+        operation_task.cancel()
+        await asyncio.gather(operation_task, anyio_task, return_exceptions=True)
+        pool = runtime.default_instance.get_connection_pool()
+        await _with_timeout(
+            asyncio.gather(*tuple(pool._background_tasks)),
+            "Cancelled operation cleanup did not finish.",
+        )
+        await runtime.aclose()
 
 
 @pytest.mark.anyio
