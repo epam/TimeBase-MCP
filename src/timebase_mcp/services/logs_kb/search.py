@@ -43,9 +43,10 @@ _FIELD_WEIGHTS = {
 }
 _CAMEL_PART_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+")
 _EMBEDDED_LOG_START_RE = re.compile(
-    r"\s+(?=(?:[A-Za-z0-9_.-]+\s+\|\s+)?\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{3,9})?\s+(?:TRACE|DEBUG|INFO|WARN|ERROR|FATAL|SEVERE)\b)"
+    r"(?<!\s)\s+(?=(?:[A-Za-z0-9_.-]+\s+\|\s+)?\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{3,9})?\s+(?:TRACE|DEBUG|INFO|WARN|ERROR|FATAL|SEVERE)\b)"
 )
 _EXCEPTION_RE = re.compile(r"\b[A-Za-z0-9_$.]+(?:Exception|Error)\b")
+_EXCEPTION_TOKEN_RE = re.compile(r"\b[A-Za-z0-9_$.]+")
 _TOKEN_ALIASES = {
     "server": ("service",),
     "service": ("server",),
@@ -366,6 +367,14 @@ def _is_distinctive_query_token(token: str, idf: dict[str, float]) -> bool:
     return idf.get(token, 0.0) >= 1.2
 
 
+def _find_exception_head(text: str) -> re.Match[str] | None:
+    for candidate in _EXCEPTION_TOKEN_RE.finditer(text):
+        match = _EXCEPTION_RE.match(text, candidate.start())
+        if match is not None:
+            return match
+    return None
+
+
 def _is_broad_query(query_text: str) -> bool:
     text = query_text.strip()
     if not text:
@@ -373,7 +382,7 @@ def _is_broad_query(query_text: str) -> bool:
     if any(_looks_like_stack_frame(line) for line in text.splitlines()):
         return False
 
-    match = _EXCEPTION_RE.search(text)
+    match = _find_exception_head(text)
     if not match:
         return False
 
@@ -441,7 +450,7 @@ def _looks_like_exception_head(line: str) -> bool:
     return (
         lowered.startswith("caused by:")
         or "exception in thread" in lowered
-        or bool(_EXCEPTION_RE.search(line))
+        or _find_exception_head(line) is not None
     )
 
 
@@ -498,6 +507,7 @@ def _extract_log_level_and_body(line: str) -> tuple[str | None, str]:
     if not stripped:
         return None, ""
 
+    prefix_end = _log_prefix_end(stripped)
     for level in _LOG_LEVELS:
         if stripped.startswith(level):
             return level, _trim_log_body_prefix(
@@ -505,27 +515,27 @@ def _extract_log_level_and_body(line: str) -> tuple[str | None, str]:
             ) or stripped
 
         marker = f" {level}"
-        start = stripped.find(marker)
-        while start >= 0:
-            prefix = stripped[:start].rstrip()
-            if _looks_like_log_prefix(prefix):
-                body = stripped[start + len(marker) :].lstrip()
-                return level, _trim_log_body_prefix(body) or stripped
-            start = stripped.find(marker, start + 1)
+        start = stripped.find(marker, prefix_end)
+        if start >= 0:
+            body = stripped[start + len(marker) :].lstrip()
+            return level, _trim_log_body_prefix(body) or stripped
 
     return None, stripped
 
 
-def _looks_like_log_prefix(prefix: str) -> bool:
-    if not prefix:
-        return False
-    if "|" in prefix:
-        return True
-
-    digit_count = sum(ch.isdigit() for ch in prefix)
-    if digit_count < 2:
-        return False
-    return prefix.count(":") >= 2 or prefix.count("-") >= 2 or prefix.count("/") >= 2
+def _log_prefix_end(text: str) -> int:
+    digit_count = 0
+    separators = {":": 0, "-": 0, "/": 0}
+    # Once a prefix qualifies, all longer prefixes qualify too.
+    for end, char in enumerate(text, 1):
+        if char == "|":
+            return end
+        digit_count += char.isdigit()
+        if char in separators:
+            separators[char] += 1
+        if digit_count >= 2 and any(count >= 2 for count in separators.values()):
+            return end
+    return len(text)
 
 
 def _trim_log_body_prefix(body: str) -> str:

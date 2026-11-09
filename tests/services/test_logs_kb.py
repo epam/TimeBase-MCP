@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 
 from timebase_mcp.services.logs_kb import search as logs_kb_search
@@ -151,6 +154,95 @@ def test_search_entries_splits_single_line_container_logs() -> None:
     assert normalized == (
         "Cannot load license from server. Error: java.io.IOException\n"
         "License invalid. Reason: It is impossible to establish connection with a License Server."
+    )
+
+
+@pytest.mark.parametrize("separator", [" \t  ", "\u2003", "\r\n"])
+@pytest.mark.parametrize("container", ["", "timebase-1  | "])
+def test_normalize_query_text_splits_headers_after_whitespace(
+    separator: str, container: str
+) -> None:
+    query = (
+        f"{container}2026-09-01 10:14:13.948 ERROR [main]: failed first"
+        f"{separator}{container}2026-09-01 10:14:14.948 ERROR [main]: failed second"
+    )
+
+    assert logs_kb_search.normalize_query_text(query) == "failed first\nfailed second"
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("2026-09-01 10:14:13.948 ERROR [main]: - failed", "failed"),
+        ("worker| ERROR [main]: failed", "failed"),
+        ("a ERROR a ERROR a 2026/09/01 10:14:13 ERROR [main]: failed", "failed"),
+        ("2026-09-01 10:14:13 ERROR original INFO [main]: chosen", "chosen"),
+        ("ERROR original INFO later", "original INFO later"),
+        ("INFOinitialized", "initialized"),
+        ("body INFO words ERROR not a header", "body INFO words ERROR not a header"),
+    ],
+)
+def test_normalize_query_text_preserves_log_level_header_rules(
+    query: str, expected: str
+) -> None:
+    assert logs_kb_search.normalize_query_text(query) == expected
+
+
+@pytest.mark.parametrize(
+    ("query", "broad"),
+    [
+        ("java.lang.IllegalStateException", True),
+        ("a..$FooError", True),
+        ("Error.Exception", True),
+        ("(FooException)", True),
+        ("FooException failed", True),
+        ("Exception", False),
+        ("$Error", False),
+        ("éFooException", False),
+        ("é.FooException", False),
+        ("FooExceptioné", False),
+        ("FooException_", False),
+        ("FooException$trailing", False),
+    ],
+)
+def test_query_advice_preserves_exception_name_boundaries(
+    query: str, broad: bool
+) -> None:
+    expected = (
+        [
+            "query looks broad; add the first stack frame or adjacent error lines to improve precision"
+        ]
+        if broad
+        else []
+    )
+
+    assert logs_kb_search.query_advice(query, query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        pytest.param("Error: x" + " " * 100_000 + "x", id="whitespace"),
+        pytest.param("a." * 50_000 + "z", id="dotted-name"),
+        pytest.param("a " + "ERROR a " * 12_500, id="false-level-markers"),
+    ],
+)
+def test_normalize_query_text_handles_long_non_headers(query: str) -> None:
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys\n"
+                "from timebase_mcp.services.logs_kb.search import normalize_query_text\n"
+                "query = sys.stdin.read()\n"
+                "assert normalize_query_text(query) == query[:900].rstrip()\n"
+            ),
+        ],
+        input=query,
+        text=True,
+        timeout=5,
+        check=True,
     )
 
 
