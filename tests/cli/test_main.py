@@ -1,6 +1,9 @@
+import errno
 import importlib
+import json
 import logging
 import sys
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
 
@@ -234,12 +237,14 @@ def test_load_settings_logs_redacted_configuration_on_validation_error(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv(SettingsEnv.TIMEBASE_USERNAME, "service-user")
-    monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "secret")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_PASSWORD, "credential-log-password")
     monkeypatch.setenv(
         SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL, "https://idp.example/token"
     )
     monkeypatch.setenv(SettingsEnv.TIMEBASE_OAUTH2_CLIENT_ID, "client-id")
-    monkeypatch.setenv(SettingsEnv.TIMEBASE_OAUTH2_CLIENT_SECRET, "client-secret")
+    monkeypatch.setenv(
+        SettingsEnv.TIMEBASE_OAUTH2_CLIENT_SECRET, "credential-log-client-secret"
+    )
     monkeypatch.setenv(SettingsEnv.MCP_LOG_LEVEL, "debug")
 
     with (
@@ -254,12 +259,231 @@ def test_load_settings_logs_redacted_configuration_on_validation_error(
     assert "Invalid TimeBase MCP configuration:" in caplog.text
     assert '"tb_username": "service-user"' in caplog.text
     assert '"tb_password": "**********"' in caplog.text
-    assert '"tb_password": "secret"' not in caplog.text
+    assert "credential-log-password" not in caplog.text
     assert '"tb_oauth2_client_secret": "**********"' in caplog.text
-    assert '"tb_oauth2_client_secret": "client-secret"' not in caplog.text
+    assert "credential-log-client-secret" not in caplog.text
     assert '"tb_oauth2_token_url": "https://idp.example/token"' in caplog.text
     assert '"log_level": "debug"' in caplog.text
     assert "Env diagnostics:" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {SettingsEnv.TIMEBASE_PASSWORD: "credential-log-secret"},
+        {SettingsEnv.TIMEBASE_OAUTH2_CLIENT_SECRET: "credential-log-secret"},
+        {
+            SettingsEnv.TIMEBASE_OAUTH2_TOKEN_PARAMS: json.dumps(
+                {"client_secret": "credential-log-secret"}
+            )
+        },
+        {SettingsEnv.TIMEBASE_WEBADMIN_PASSWORD: "credential-log-secret"},
+        {SettingsEnv.TIMEBASE_WEBADMIN_CLIENT_SECRET: "credential-log-secret"},
+        {SettingsEnv.TIMEBASE_WEBADMIN_API_SECRET: "credential-log-secret"},
+        {
+            SettingsEnv.TIMEBASE_SERVERS: json.dumps(
+                [
+                    {
+                        "url": "dxtick://localhost:8011",
+                        "password": "credential-log-secret",
+                    }
+                ]
+            )
+        },
+    ],
+)
+def test_load_settings_errors_do_not_expose_credentials(
+    environment: dict[str, str],
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(ConfigurationError):
+        server_module.load_settings()
+
+    assert "Invalid TimeBase MCP configuration:" in caplog.text
+    assert "credential-log-secret" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        SettingsEnv.TIMEBASE_URL,
+        SettingsEnv.TIMEBASE_HTTP_URL,
+        SettingsEnv.TIMEBASE_OAUTH2_TOKEN_URL,
+        SettingsEnv.TIMEBASE_WEBADMIN_URL,
+        SettingsEnv.TIMEBASE_WEBADMIN_ISSUER_URL,
+        SettingsEnv.TIMEBASE_WEBADMIN_REDIRECT_URI,
+        SettingsEnv.TIMEBASE_WEBADMIN_TOKEN_URL,
+        SettingsEnv.MCP_AUTH_ISSUER_URL,
+        SettingsEnv.MCP_AUTH_JWKS_URL,
+        SettingsEnv.MCP_AUTH_PUBLIC_URL,
+    ],
+)
+def test_load_settings_sanitizes_urls_in_error_diagnostics(
+    variable: str,
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv(
+        variable,
+        "https://user:private-url-password@diagnostic.example/context"
+        "?token=private-url-query#private-url-fragment",
+    )
+    monkeypatch.setenv(SettingsEnv.MCP_PORT, "invalid")
+
+    with caplog.at_level(logging.ERROR), pytest.raises(ConfigurationError):
+        server_module.load_settings()
+
+    assert "https://diagnostic.example/context" in caplog.text
+    for secret in ("private-url-password", "private-url-query", "private-url-fragment"):
+        assert secret not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("environment", "message"),
+    [
+        (
+            {
+                SettingsEnv.TIMEBASE_HTTP_URL: (
+                    "https://reader:123/private-url-secret@monitor.example/context"
+                ),
+                SettingsEnv.MCP_PORT: "invalid",
+            },
+            "MCP_PORT",
+        ),
+        (
+            {SettingsEnv.TIMEBASE_WEBADMIN_URL: "http://[u:private-url-secret]"},
+            "webadmin_url must be an HTTP(S) URL",
+        ),
+        (
+            {
+                SettingsEnv.TIMEBASE_SERVERS: json.dumps(
+                    [{"url": "dxtick://u:private-url-secret@", "auth_mode": "basic"}]
+                )
+            },
+            "basic auth requires username and password",
+        ),
+        (
+            {SettingsEnv.TIMEBASE_SERVERS: "https://u:private-url-secret@example/file"},
+            "Cannot read TIMEBASE_SERVERS file",
+        ),
+        (
+            {
+                SettingsEnv.MCP_TRANSPORT: "streamable-http",
+                SettingsEnv.MCP_HOST: "0.0.0.0",
+                SettingsEnv.MCP_AUTH_AUDIENCE: "timebase-api",
+                SettingsEnv.MCP_AUTH_PUBLIC_URL: "https://[u:private-url-secret]",
+            },
+            "MCP_AUTH_PUBLIC_URL must use HTTPS",
+        ),
+    ],
+)
+def test_load_settings_rejects_invalid_urls_without_exposing_them(
+    environment: dict[str, str],
+    message: str,
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(ConfigurationError):
+        server_module.load_settings()
+
+    assert message in caplog.text
+    assert "private-url-secret" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "https://u:private-url-secret@localhost/callback",
+        "http://localhost:private-url-secret/callback",
+    ],
+)
+def test_load_settings_redirect_errors_do_not_expose_input(
+    redirect_uri: str,
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_URL, "https://webadmin.example")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_AUTH_MODE, "interactive")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_CLIENT_ID, "client")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_ISSUER_URL, "https://idp.example")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_SCOPE, "webadmin.read")
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_WEBADMIN_REDIRECT_URI, redirect_uri)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(ConfigurationError):
+        server_module.load_settings()
+
+    assert "Interactive OAuth redirect URI" in caplog.text
+    assert "private-url-secret" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"url": "dxtick://localhost:8011", "password": "private-url-secret"},
+        {"url": "dxtick://u:private-url-secret@", "auth_mode": "basic"},
+    ],
+)
+def test_servers_print_errors_do_not_expose_credentials(
+    server: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from timebase_mcp.cli.app import main
+
+    path = tmp_path / "servers.json"
+    path.write_text(json.dumps([server]))
+
+    assert main(["servers-print", str(path)]) == 1
+
+    output = capsys.readouterr()
+    assert "basic auth requires username and password" in output.err
+    assert "private-url-secret" not in output.err + output.out
+
+
+@pytest.mark.parametrize(
+    ("error_number", "reason"),
+    [
+        (errno.ENOENT, "No such file or directory"),
+        (errno.EACCES, "Permission denied"),
+    ],
+)
+def test_server_file_errors_keep_the_reason_without_exposing_the_path(
+    error_number: int,
+    reason: str,
+    server_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from timebase_mcp.cli.app import main
+
+    path = tmp_path / "private-file-password.json"
+
+    def fail_read(path: Path, **_kwargs: object) -> str:
+        raise OSError(error_number, reason, str(path))
+
+    monkeypatch.setattr(Path, "read_text", fail_read)
+    monkeypatch.setenv(SettingsEnv.TIMEBASE_SERVERS, str(path))
+
+    with caplog.at_level(logging.ERROR), pytest.raises(ConfigurationError):
+        server_module.load_settings()
+    assert main(["servers-print", str(path)]) == 1
+
+    output = capsys.readouterr()
+    assert reason in caplog.text
+    assert reason in output.err
+    assert "private-file-password" not in caplog.text + output.err + output.out
+    assert str(path) not in caplog.text + output.err + output.out
 
 
 def test_load_settings_keeps_configuration_error_when_payload_rendering_fails(

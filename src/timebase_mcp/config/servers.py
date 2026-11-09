@@ -2,7 +2,14 @@ import json
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from timebase_mcp.auth.oauth2 import OAUTH2_RESERVED_PARAMS
 from timebase_mcp.config.env import SettingsEnv
@@ -15,7 +22,10 @@ from timebase_mcp.config.oauth import (
     oauth2_fields_present,
 )
 from timebase_mcp.config.types import OutboundAuthMode
-from timebase_mcp.config.urls import extract_timebase_url_credentials
+from timebase_mcp.config.urls import (
+    extract_timebase_url_credentials,
+    sanitize_url_for_log,
+)
 from timebase_mcp.config.webadmin import (
     WEBADMIN_FIELD_NAMES,
     WebAdminConfig,
@@ -87,20 +97,17 @@ def load_servers_scalar(value: str) -> list[dict[str, object]]:
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ValueError(
-            f"Cannot read TIMEBASE_SERVERS file {stripped!r}: {exc}"
-        ) from exc
+        reason = exc.strerror or "I/O error"
+        raise ValueError(f"Cannot read TIMEBASE_SERVERS file: {reason}.") from None
 
     try:
         payload = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"TIMEBASE_SERVERS file {stripped!r} must contain valid JSON."
-        ) from exc
+    except json.JSONDecodeError:
+        raise ValueError("TIMEBASE_SERVERS file must contain valid JSON.") from None
 
     return parse_servers_json_payload(
         payload,
-        source=f"TIMEBASE_SERVERS file {stripped!r}",
+        source="TIMEBASE_SERVERS file",
     )
 
 
@@ -129,6 +136,8 @@ class ServerConfig(BaseModel):
 
     Parsed from ``TIMEBASE_SERVERS`` (JSON string or file) or indexed env vars.
     """
+
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     name: str | None = Field(
         default=None,
@@ -217,6 +226,7 @@ class ServerConfig(BaseModel):
         if extracted_password is not None and self.password is None:
             self.password = SecretStr(extracted_password)
 
+        server_label = self.name or sanitize_url_for_log(self.url)
         oauth2_present = self.oauth2_present
         oauth2_service_evidence = self.oauth2_service_evidence_present
         mode = self.auth_mode or infer_outbound_auth_mode(
@@ -228,12 +238,12 @@ class ServerConfig(BaseModel):
         if mode == "basic":
             if self.username is None or self.password is None:
                 raise ValueError(
-                    f"Server '{self.instance_key}': basic auth requires username and password."
+                    f"Server '{server_label}': basic auth requires username and password."
                 )
         elif mode == "oauth2_client_credentials":
             if self.password is not None:
                 raise ValueError(
-                    f"Server '{self.instance_key}': oauth2_client_credentials cannot be combined "
+                    f"Server '{server_label}': oauth2_client_credentials cannot be combined "
                     "with password."
                 )
 
@@ -248,7 +258,7 @@ class ServerConfig(BaseModel):
             ]
             if missing:
                 raise ValueError(
-                    f"Server '{self.instance_key}': oauth2_client_credentials requires "
+                    f"Server '{server_label}': oauth2_client_credentials requires "
                     + ", ".join(missing)
                     + "."
                 )
@@ -260,7 +270,7 @@ class ServerConfig(BaseModel):
         elif mode in ("none", "forward_identity"):
             if self.username is not None or self.password is not None or oauth2_present:
                 raise ValueError(
-                    f"Server '{self.instance_key}': auth_mode '{mode}' cannot be combined "
+                    f"Server '{server_label}': auth_mode '{mode}' cannot be combined "
                     "with username, password, or oauth2 client-credentials settings."
                 )
         elif mode == "interactive":
@@ -277,7 +287,7 @@ class ServerConfig(BaseModel):
             ]
             if forbidden:
                 raise ValueError(
-                    f"Server '{self.instance_key}': auth_mode 'interactive' cannot be "
+                    f"Server '{server_label}': auth_mode 'interactive' cannot be "
                     "combined with " + ", ".join(forbidden) + "."
                 )
         elif mode == "auto":
@@ -285,17 +295,17 @@ class ServerConfig(BaseModel):
                 self.password is None
             ) and not oauth2_service_evidence:
                 raise ValueError(
-                    f"Server '{self.instance_key}': auth_mode 'auto' requires username and "
+                    f"Server '{server_label}': auth_mode 'auto' requires username and "
                     "password together when resolving basic auth."
                 )
             if self.password is not None and self.username is None:
                 raise ValueError(
-                    f"Server '{self.instance_key}': auth_mode 'auto' cannot resolve a "
+                    f"Server '{server_label}': auth_mode 'auto' cannot resolve a "
                     "password without username."
                 )
             if self.password is not None and oauth2_service_evidence:
                 raise ValueError(
-                    f"Server '{self.instance_key}': auth_mode 'auto' cannot resolve both "
+                    f"Server '{server_label}': auth_mode 'auto' cannot resolve both "
                     "password and oauth2 client-credentials settings."
                 )
             if oauth2_service_evidence:
@@ -313,7 +323,7 @@ class ServerConfig(BaseModel):
                 ]
                 if missing:
                     raise ValueError(
-                        f"Server '{self.instance_key}': auth_mode 'auto' with OAuth2 "
+                        f"Server '{server_label}': auth_mode 'auto' with OAuth2 "
                         "settings requires " + ", ".join(missing) + "."
                     )
                 self._validate_reserved_oauth2_token_params()
@@ -327,8 +337,9 @@ class ServerConfig(BaseModel):
             name for name in extra_token_params if name in OAUTH2_RESERVED_PARAMS
         )
         if conflicting_params:
+            server_label = self.name or sanitize_url_for_log(self.url)
             raise ValueError(
-                f"Server '{self.instance_key}': oauth2_token_params cannot override "
+                f"Server '{server_label}': oauth2_token_params cannot override "
                 "reserved OAuth2 fields: " + ", ".join(conflicting_params) + "."
             )
 

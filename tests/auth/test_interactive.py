@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from urllib import parse
 
 import pytest
@@ -13,6 +14,7 @@ from timebase_mcp.auth.discovery import (
 )
 from timebase_mcp.auth.interactive import (
     InteractiveOAuthProvider,
+    _parse_redirect_uri,
     resolve_interactive_redirect_uri,
 )
 from timebase_mcp.auth.oauth2 import TokenResponse, UrlLibTokenEndpointClient
@@ -32,6 +34,23 @@ from timebase_mcp.errors import ConfigurationError
 )
 def test_resolve_interactive_redirect_uri(host: str, port: int, expected: str) -> None:
     assert resolve_interactive_redirect_uri(host=host, port=port) == expected
+
+
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "https://user:redirect-secret@localhost/callback",
+        "http:///callback?token=redirect-secret",
+        "http://[user:redirect-secret]/callback",
+        "http://localhost:redirect-secret/callback",
+    ],
+)
+def test_redirect_uri_errors_do_not_expose_credentials(redirect_uri: str) -> None:
+    with pytest.raises(ConfigurationError) as exc_info:
+        _parse_redirect_uri(redirect_uri)
+
+    assert "redirect-secret" not in "".join(traceback.format_exception(exc_info.value))
+    assert "Interactive OAuth redirect URI" in str(exc_info.value)
 
 
 def test_settings_resolved_interactive_redirect_uri(

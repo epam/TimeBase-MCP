@@ -1,7 +1,24 @@
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
 
 from timebase_mcp.config.types import _HTTP_TRANSPORTS, Transport
 from timebase_mcp.constants import LOOPBACK_HOSTS
+
+
+def sanitize_url_for_log(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        # An unescaped slash in credentials can put the password in the path.
+        if parsed.scheme and parsed.netloc and "@" not in parsed.path:
+            authority = parsed.netloc.rsplit("@", 1)[-1]
+            for node in authority.split("|"):
+                node_url = urlsplit("//" + node)
+                _ = node_url.port  # urllib validates ports when this property is read.
+                if not node_url.hostname:
+                    return "**********"
+            return urlunsplit((parsed.scheme, authority, parsed.path, "", ""))
+    except ValueError:
+        pass
+    return "**********"
 
 
 def split_authority_and_suffix(value: str) -> tuple[str, str]:
@@ -47,10 +64,16 @@ def is_remote_http_bind(*, transport: Transport, host: str) -> bool:
 
 
 def is_loopback_or_local_url(value: str) -> bool:
-    parsed = urlparse(value)
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
     host = parsed.hostname
     return host is not None and is_loopback_host(host)
 
 
 def is_https_url(value: str) -> bool:
-    return urlparse(value).scheme.casefold() == "https"
+    try:
+        return urlparse(value).scheme.casefold() == "https"
+    except ValueError:
+        return False

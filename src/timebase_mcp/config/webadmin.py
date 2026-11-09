@@ -21,10 +21,15 @@ from timebase_mcp.errors import ConfigurationError
 
 
 def trusted_https_url(value: str) -> tuple[str, str, int]:
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        raise ValueError("WebAdmin OAuth URL has an invalid host or port.") from None
     if (
         parsed.scheme != "https"
-        or not parsed.hostname
+        or not host
         or parsed.username is not None
         or parsed.password is not None
         or parsed.fragment
@@ -34,7 +39,7 @@ def trusted_https_url(value: str) -> tuple[str, str, int]:
         raise ValueError(
             "WebAdmin OAuth issuer and endpoints require trusted HTTPS URLs without credentials, query or fragment."
         )
-    return parsed.scheme, parsed.hostname, parsed.port or 443
+    return parsed.scheme, host, port or 443
 
 
 class WebAdminAuthConfig(BaseModel):
@@ -213,7 +218,10 @@ class WebAdminConfig(BaseModel):
     def normalize_url(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        parsed = urlparse(value)
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            raise ValueError("webadmin_url must be an HTTP(S) URL.") from None
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError("webadmin_url must be an HTTP(S) URL.")
         if parsed.username is not None or parsed.password is not None:
