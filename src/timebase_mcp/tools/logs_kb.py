@@ -1,3 +1,4 @@
+from anyio.to_thread import run_sync
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
@@ -6,6 +7,7 @@ from pydantic import Field
 from timebase_mcp.errors import TimeBaseMCPError
 from timebase_mcp.models.logs_kb import SearchLogsKBResult
 from timebase_mcp.runtime.state import TimeBaseRuntime
+from timebase_mcp.services.logs_kb.search import MAX_RAW_QUERY_CHARACTERS
 from timebase_mcp.services.logs_kb.search import (
     search_logs_kb as search_logs_kb_service,
 )
@@ -28,6 +30,7 @@ def register_logs_kb_tools(mcp: MCPServer) -> None:
     async def search_logs_kb(
         ctx: Context[TimeBaseRuntime],
         query: str = Field(
+            max_length=MAX_RAW_QUERY_CHARACTERS,
             description="Raw log text, stack trace, or error excerpt to search for."
         ),
         limit: int = Field(
@@ -38,7 +41,10 @@ def register_logs_kb_tools(mcp: MCPServer) -> None:
     ) -> SearchLogsKBResult:
         _ = ctx
         try:
-            return search_logs_kb_service(query=query, limit=limit)
+            # Keep local searches independent of the TimeBase executor.
+            return await run_sync(
+                lambda: search_logs_kb_service(query=query, limit=limit)
+            )
         except (TimeBaseMCPError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
 
