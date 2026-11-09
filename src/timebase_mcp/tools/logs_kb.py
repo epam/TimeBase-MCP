@@ -1,5 +1,4 @@
-import asyncio
-
+from anyio.to_thread import run_sync
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
@@ -42,8 +41,9 @@ def register_logs_kb_tools(mcp: MCPServer) -> None:
     ) -> SearchLogsKBResult:
         _ = ctx
         try:
-            return await asyncio.to_thread(
-                search_logs_kb_service, query=query, limit=limit
+            # Keep local searches independent of the TimeBase executor.
+            return await run_sync(
+                lambda: search_logs_kb_service(query=query, limit=limit)
             )
         except (TimeBaseMCPError, ValueError) as exc:
             raise ToolError(str(exc)) from exc
