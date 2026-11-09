@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import types
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -28,6 +29,7 @@ def make_rsa_verifier(
     issuer: str = "https://idp.example",
     audience: str | None = None,
     required_scopes: list[str] | None = None,
+    scope_aliases: Mapping[str, str] | None = None,
 ) -> tuple[JwksTokenVerifier, rsa.RSAPrivateKey]:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     verifier = JwksTokenVerifier(
@@ -35,6 +37,7 @@ def make_rsa_verifier(
         issuer=issuer,
         audience=audience,
         required_scopes=required_scopes,
+        scope_aliases=scope_aliases,
     )
     verifier._jwks_client = types.SimpleNamespace(  # type: ignore[attr-defined]
         get_signing_key_from_jwt=lambda _token: types.SimpleNamespace(

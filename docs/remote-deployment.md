@@ -9,8 +9,7 @@ Use this when one `timebase-mcp` HTTP server is shared by multiple users. There 
 
 `timebase-mcp` is an **OAuth Resource Server** only. It validates bearer tokens and can publish OAuth Protected Resource Metadata for MCP clients. It does **not** issue tokens or host login pages. Your IdP is the **Authorization Server**.
 
-> [!WARNING]
-> **Microsoft Entra ID:** inbound SSO for remote HTTP MCP is **not supported** today. Remote MCP clients send RFC 8707 `resource=<MCP URL>` from Protected Resource Metadata. Since March 2026 Entra v2.0 rejects that against `api://...` scopes (`AADSTS9010010`). For Entra-backed teams, use **API keys** for remote MCP access, **local `stdio`** for user OAuth to TimeBase, or **another IdP**. See [AADSTS9010010 (Microsoft Entra ID)](troubleshooting.md#aadsts9010010-microsoft-entra-id).
+Microsoft Entra ID supports per-user SSO through a [shared TimeBase API registration](#microsoft-entra-id).
 
 ## 1. Choose a deployment pattern
 
@@ -69,7 +68,7 @@ MCP_AUTH_AUDIENCE=api://timebase-api
 # MCP_AUTH_REQUIRED_SCOPES=timebase.read
 ```
 
-JWT tokens are validated for signature, expiry, issuer, audience (`MCP_AUTH_AUDIENCE`), and required scopes (`MCP_AUTH_REQUIRED_SCOPES`, if set). The current verifier accepts RS256-signed JWTs.
+JWT tokens are validated for signature, expiry, issuer, audience (`MCP_AUTH_AUDIENCE`), and required scopes (`MCP_AUTH_REQUIRED_SCOPES`, if set). The current verifier accepts RS256-signed JWTs and requires an `exp` claim.
 
 ### API keys
 
@@ -98,7 +97,7 @@ Mount the store as a **Secret/ConfigMap** (k8s) or volume (Docker) at `MCP_AUTH_
 
 For IdP mode, register the OAuth pieces in your IdP. Remember: the IdP is the Authorization Server; `timebase-mcp` is only a Resource Server.
 
-1. **An API / resource (audience)** whose identifier becomes `MCP_AUTH_AUDIENCE`.
+1. **An API / resource (audience)** whose token audience becomes `MCP_AUTH_AUDIENCE`. For Entra v2, use the API app's Application (client) ID.
    - For **per-user SSO / `forward_identity`**, use the TimeBase API audience because the same token is forwarded to TimeBase.
    - For **SSO + service account**, this can be a separate MCP API audience because MCP does not forward the caller's token to TimeBase.
 2. **A client application** that end users' MCP clients authenticate through, with appropriate redirect URIs and scopes.
@@ -115,13 +114,65 @@ For IdPs with no DCR, register a backend API app (exposing a scope, e.g. `api://
 
 For **TimeBase-side OAuth** (local `interactive` login or outbound service accounts), see the [TimeBase UAC OAuth2 guide](https://kb.timebase.info/docs/development/tools/uac#oauth2) and the [TimeBase Entra ID registration howto](https://kb.timebase.info/docs/development/howto#azure-ad-entra-id-application-registration-for-timebase-applications).
 
+### Microsoft Entra ID
+
+Start with a working [TimeBase Entra setup](https://kb.timebase.info/docs/development/howto#azure-ad-entra-id-application-registration-for-timebase-applications). Reuse its API registration to forward each user's token to TimeBase.
+
+`MCP_URL` is your public endpoint from step 2, for example `https://mcp.example.com/mcp`.
+
+#### Update Entra ID
+
+1. Open the existing TimeBase API app registration. Copy `TENANT_ID` and **Application (client) ID** as `API_APP_ID`.
+2. In **Manifest**, set `api.requestedAccessTokenVersion` to `2`. Add the exact `MCP_URL` to `identifierUris`, without a trailing slash. Keep existing TimeBase identifiers and scopes.
+3. In **Expose an API**, add an enabled delegated scope named `mcp.access`. Clients request `MCP_URL/mcp.access`.
+4. Create a single-tenant app registration for each client. Save their **Application (client) ID**. Under **Authentication > Add Redirect URI > Mobile and desktop applications**, register its redirects:
+
+   | Client | Redirect URIs |
+   | - | - |
+   | Claude Code | `http://localhost:8080/callback` |
+   | VS Code | `http://127.0.0.1:33418` and `https://vscode.dev/redirect` |
+
+For other clients follow their documentation on OAuth.
+
+5. For each client, open **API permissions > Add a permission > My APIs**. Select the TimeBase API and delegated `mcp.access`. Grant consent and any required user assignments.
+
+These steps follow [Microsoft's MCP registration guide](https://learn.microsoft.com/en-us/entra/agent-id/secure-mcp-server-with-entra-id#register-your-mcp-server-in-microsoft-entra-id).
+
+#### Update TimeBase Configuration
+
+Add the client IDs inside `<oauthSettings>` in the existing `QS_HOME/config/uac-oauth-security.xml`, then restart TimeBase:
+
+```xml
+<clientId app="mcp.claude">CLAUDE_CLIENT_ID</clientId>
+<clientId app="mcp.vscode">VSCODE_CLIENT_ID</clientId>
+...
+```
+
+Omit unused clients and IDs already allowed.
+
+#### Configure MCP
+
+Alongside the HTTP settings and your `TIMEBASE_URL`, set:
+
+```dotenv
+MCP_AUTH_PUBLIC_URL=https://mcp.example.com/mcp
+MCP_AUTH_ISSUER_URL=https://login.microsoftonline.com/TENANT_ID/v2.0
+MCP_AUTH_JWKS_URL=https://login.microsoftonline.com/TENANT_ID/discovery/v2.0/keys
+MCP_AUTH_AUDIENCE=API_APP_ID
+MCP_AUTH_REQUIRED_SCOPES=https://mcp.example.com/mcp/mcp.access
+MCP_AUTH_SCOPE_ALIASES={"https://mcp.example.com/mcp/mcp.access":"mcp.access"}
+TIMEBASE_AUTH_MODE=forward_identity
+```
+
+Replace the hostname and IDs. `MCP_AUTH_AUDIENCE` is the TimeBase API app's GUID. A [complete env file](examples/deployments/entra-shared-resource.env) is also available.
+
 ## 5. Configure outbound auth to TimeBase
 
 Set `TIMEBASE_AUTH_MODE` (or leave it `auto`):
 
 | Mode | What it does | Settings |
 | - | - | - |
-| `forward_identity` | Forwards each authenticated caller's bearer token to TimeBase, so TimeBase enforces that user's permissions | Requires inbound JWT auth + HTTP transport; TimeBase must advertise OAuth |
+| `forward_identity` | Forwards each authenticated caller's bearer token to TimeBase, so TimeBase enforces that user's permissions | Requires inbound JWT auth + HTTP transport; TimeBase must accept the forwarded token |
 | `oauth2_client_credentials` | MCP connects with one shared service-account | `TIMEBASE_OAUTH2_TOKEN_URL`, `TIMEBASE_OAUTH2_CLIENT_ID`, `TIMEBASE_OAUTH2_CLIENT_SECRET`, `TIMEBASE_OAUTH2_SCOPE` |
 | `basic` | One shared username/password | `TIMEBASE_USERNAME`, `TIMEBASE_PASSWORD` |
 | `none` | — | — |
@@ -163,12 +214,12 @@ MCP_OPERATION_TIMEOUT_SECONDS=60
 
 The image is available from GitHub Container Registry as `ghcr.io/epam/timebase-mcp`. The [`Dockerfile`](../Dockerfile) installs `timebase-mcp[all]`, so the server auto-selects the right client edition per connected TimeBase instance. Defaults: `MCP_TRANSPORT=streamable-http`, `MCP_HOST=0.0.0.0`, `MCP_PORT=8000`.
 
-Create an env file from one of the examples below, then run:
+Create an env file from one of the examples below. Replace `YOUR_VERSION` with the release to deploy, then run:
 
 ```bash
 docker run --rm -p 8000:8000 \
   --env-file ./timebase-mcp.env \
-  ghcr.io/epam/timebase-mcp:0.2.1
+  ghcr.io/epam/timebase-mcp:YOUR_VERSION
 ```
 
 </details>
@@ -187,6 +238,8 @@ timebase-mcp
 ## Example deployments
 
 **Per-user SSO:** TimeBase enforces each caller's permissions via `forward_identity`. See [examples/deployments/per-user-sso.env](./examples/deployments/per-user-sso.env).
+
+**Entra shared resource:** see [Microsoft Entra ID](#microsoft-entra-id) and the [env example](examples/deployments/entra-shared-resource.env).
 
 **SSO for MCP, unprotected TimeBase:** inbound SSO protects MCP; TimeBase has no auth. `MCP_AUTH_ISSUER_URL` is required because `/tb/oauthinfo` does not provide an issuer. Register a separate MCP API app in your IdP (`MCP_AUTH_AUDIENCE`) and expose the scope used in `MCP_AUTH_REQUIRED_SCOPES`. See [examples/deployments/sso-unprotected-timebase.env](./examples/deployments/sso-unprotected-timebase.env).
 

@@ -12,11 +12,19 @@ MCP has inbound authentication for its HTTP endpoint and separate outbound authe
 
 On `streamable-http`, inbound authentication is enabled when `MCP_AUTH_AUDIENCE` or `MCP_AUTH_API_KEYS_FILE` is set. JWT authentication validates caller tokens. MCP API-key authentication validates bearer keys against the configured hashed key store.
 
+JWTs require a valid signature, issuer, audience, and expiration. Tokens without `exp` are rejected.
+
+MCP advertises `MCP_AUTH_REQUIRED_SCOPES` to clients and requires them on requests. `MCP_AUTH_SCOPE_ALIASES` maps these permissions to exact values in the JWT's space-delimited `scp` string. Aliases do not accept `roles` or `scope` and do not chain. Unmapped permissions retain their existing matching rules.
+
+Aliases default to `{}`. Nonempty maps require HTTP JWT authentication with an audience. Each key must be a required permission. Keys and values must be nonempty printable ASCII without spaces, double quotes, or backslashes.
+
 Inbound authentication controls access to MCP. It does not supply WebAdmin credentials. The [environment reference](environment-variables.md#inbound-mcp-authentication) lists the inbound settings.
 
 ## Native TimeBase authentication
 
 Native `forward_identity` forwards the authenticated caller's JWT to TimeBase. MCP and TimeBase must accept the same token audience. Other native modes use separately configured credentials or anonymous access.
+
+Scope aliases do not change the token or claims forwarded to TimeBase.
 
 ## Auto mode decision order
 

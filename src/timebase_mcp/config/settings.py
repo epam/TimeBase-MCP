@@ -1,8 +1,16 @@
+import json
 import os
 from typing import Annotated
 
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import Field, PrivateAttr, SecretStr, field_validator, model_validator
+from pydantic import (
+    Field,
+    PrivateAttr,
+    SecretStr,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     NoDecode,
@@ -15,6 +23,7 @@ from timebase_mcp.auth.oauth2 import (
     OAUTH2_RESERVED_PARAMS,
     OAuth2ClientCredentialsConfig,
 )
+from timebase_mcp.auth.scopes import is_scope_token
 from timebase_mcp.config.diagnostics import (
     field_env_name,
     redact_log_payload,
@@ -228,6 +237,14 @@ class MCPSettings(BaseSettings):
         validation_alias=SettingsEnv.MCP_AUTH_REQUIRED_SCOPES,
         description="Scopes required on inbound tokens (space/comma delimited).",
     )
+    auth_scope_aliases: Annotated[dict[StrictStr, StrictStr], NoDecode] = Field(
+        default_factory=dict,
+        validation_alias=SettingsEnv.MCP_AUTH_SCOPE_ALIASES,
+        description=(
+            "JSON mapping from required OAuth permissions to exact delegated "
+            "scp values. Requires HTTP JWT authentication with an audience."
+        ),
+    )
     auth_public_url: str | None = Field(
         default=None,
         validation_alias=SettingsEnv.MCP_AUTH_PUBLIC_URL,
@@ -287,6 +304,29 @@ class MCPSettings(BaseSettings):
             value,
             error_message="Scope values must be a string or a list of strings.",
         )
+
+    @field_validator("auth_scope_aliases", mode="before")
+    @classmethod
+    def parse_scope_aliases(cls, value: object) -> object:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "MCP_AUTH_SCOPE_ALIASES must be a valid JSON object."
+                ) from exc
+        return value
+
+    @field_validator("auth_scope_aliases")
+    @classmethod
+    def validate_scope_aliases(cls, aliases: dict[str, str]) -> dict[str, str]:
+        for required, delegated in aliases.items():
+            if not is_scope_token(required) or not is_scope_token(delegated):
+                raise ValueError(
+                    "Scope alias keys and values must be single nonempty ASCII "
+                    "scope tokens without whitespace, double quotes, or backslashes."
+                )
+        return aliases
 
     @field_validator("allowed_hosts", mode="before")
     @classmethod
@@ -508,6 +548,19 @@ class MCPSettings(BaseSettings):
     @model_validator(mode="after")
     def validate_inbound_consistency(self) -> "MCPSettings":
         jwt_inbound_auth_enabled = self.inbound_auth_mode == "jwt"
+        if self.auth_scope_aliases:
+            if not jwt_inbound_auth_enabled or not self.auth_audience:
+                raise ValueError(
+                    "MCP_AUTH_SCOPE_ALIASES requires HTTP JWT authentication "
+                    "with MCP_AUTH_AUDIENCE and cannot use an API key store."
+                )
+            if not set(self.auth_scope_aliases).issubset(
+                self.auth_required_scopes or []
+            ):
+                raise ValueError(
+                    "Every MCP_AUTH_SCOPE_ALIASES key must appear in "
+                    "MCP_AUTH_REQUIRED_SCOPES."
+                )
         if jwt_inbound_auth_enabled and is_remote_http_bind(
             transport=self.transport,
             host=self.host,

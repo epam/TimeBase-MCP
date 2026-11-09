@@ -122,6 +122,26 @@ REMOTE_ENV: list[EnvVar] = [
         "format": "string",
     },
     {
+        "name": "MCP_AUTH_ISSUER_URL",
+        "description": "OAuth issuer URL override for inbound JWT authentication.",
+        "format": "string",
+    },
+    {
+        "name": "MCP_AUTH_JWKS_URL",
+        "description": "JWKS URL override for inbound JWT authentication.",
+        "format": "string",
+    },
+    {
+        "name": "MCP_AUTH_REQUIRED_SCOPES",
+        "description": "Required OAuth permissions, separated by spaces or commas.",
+        "format": "string",
+    },
+    {
+        "name": "MCP_AUTH_SCOPE_ALIASES",
+        "description": "JSON object mapping required permissions to delegated JWT scp values.",
+        "format": "string",
+    },
+    {
         "name": "MCP_AUTH_API_KEYS_FILE",
         "description": "Path to a hashed API-key store for inbound bearer-key auth.",
         "format": "filepath",
