@@ -2,6 +2,8 @@
 
 For connecting to an already running `timebase-mcp` HTTP server. You do **not** install `timebase-mcp` yourself.
 
+For Entra ID, use the [client settings below](#entra-shared-resource-clients).
+
 ## 1. What you need from the server admin
 
 - The **server URL** (e.g. `https://mcp.example.com/mcp`).
@@ -120,6 +122,8 @@ Add the server to `.vscode/mcp.json`:
 
 VS Code attempts DCR first and falls back to a manual **Client ID** prompt when the IdP doesn't support it. For **Microsoft Entra ID** or **GitHub**, use **Accounts: Manage Trusted MCP Servers for account** to sign in, or add a client ID when prompted after the first connection attempt.
 
+For Entra shared-resource authentication, use the [static client settings](#vs-code) below.
+
 For auth without DCR, register `http://127.0.0.1:33418` and `https://vscode.dev/redirect` in your IdP settings.
 
 </details>
@@ -146,6 +150,50 @@ Cursor uses static OAuth, when DCR is unavailable: supply the client ID the IdP 
 `CLIENT_SECRET` is optional for public client flows; `scopes` can be omitted if discovered from authorization-server metadata.
 
 </details>
+
+### Entra shared-resource clients
+
+Replace the example URL and client IDs with the values from your admin. The Entra scope is `MCP_URL/mcp.access`.
+
+#### Claude Code
+
+Create `.mcp.json` in your repository root:
+
+```json
+{
+	"mcpServers": {
+		"timebase": {
+			"type": "http",
+			"url": "https://mcp.example.com/mcp",
+			"oauth": {
+				"clientId": "CLAUDE_CLIENT_ID",
+				"callbackPort": 8080,
+				"scopes": "https://mcp.example.com/mcp/mcp.access openid profile offline_access"
+			}
+		}
+	}
+}
+```
+
+Start Claude Code, approve the project server, then run `/mcp` to sign in. See [Claude Code's OAuth settings](https://code.claude.com/docs/en/mcp#use-pre-configured-oauth-credentials).
+
+#### VS Code
+
+Create `.vscode/mcp.json`:
+
+```json
+{
+	"servers": {
+		"timebase": {
+			"type": "http",
+			"url": "https://mcp.example.com/mcp",
+			"oauth": {"clientId": "VSCODE_CLIENT_ID"}
+		}
+	}
+}
+```
+
+Run **MCP: List Servers**, start `timebase`, and sign in. See [VS Code's static client settings](https://code.visualstudio.com/updates/v1_123#_configure-oauth-client-credentials-in-mcpjson).
 
 ## 4. Verify
 

@@ -128,22 +128,21 @@ Logs are printed to stderr of the `timebase-mcp` process, look for them in the t
 
 - **All API keys rejected (401):** the key store is missing, unreadable, or invalid JSON. Check `MCP_AUTH_API_KEYS_FILE` and that the mounted store parses (`timebase-mcp keys list --file ...`). Keys are matched by hash, so a key works only if its hashed record is present.
 
-- **401 after successful browser login (JWT inbound):** token `aud` does not match `MCP_AUTH_AUDIENCE`. For `forward_identity`, set `MCP_AUTH_AUDIENCE` to the TimeBase API Application ID URI, not the MCP URL.
+- **401 after successful browser login (JWT inbound):** token `aud` does not match `MCP_AUTH_AUDIENCE`. For Entra v2, use the TimeBase API app's Application (client) ID. Tokens also require `exp`.
 
-- **Wrong scope in remote client config:** user login needs the delegated API scope your IdP admin configured (e.g. `api://<id>/app` from `/tb/oauthinfo` for `forward_identity`, or the MCP API scope for a separate MCP audience).
+- **Wrong scope in remote client config:** user login needs the delegated API scope your IdP admin configured (e.g. `api://<id>/app` from `/tb/oauthinfo` for `forward_identity`, or the MCP API scope for a separate MCP audience). For Entra, use the full scope, such as `https://mcp.example.com/mcp/mcp.access`.
 
 ### AADSTS9010010 (Microsoft Entra ID)
 
 **Symptom:** `AADSTS9010010: The resource parameter doesn't match the requested scopes` during remote MCP client OAuth (Cursor, VS Code, Claude Code).
 
-**Cause:** Remote MCP clients fetch [OAuth Protected Resource Metadata](https://datatracker.ietf.org/doc/html/rfc9728) from your server and send RFC 8707 `resource=<MCP HTTPS URL>` to Entra together with `api://...` scopes. From March 2026 Entra v2.0 rejects that combination. This affects all remote Entra inbound SSO. See [MCP Python SDK #2578](https://github.com/modelcontextprotocol/python-sdk/issues/2578).
+This error means the MCP URL and requested scopes do not identify the same Entra API app.
 
-**Workarounds:**
+1. Set `api.requestedAccessTokenVersion` to `2` on that app.
+2. Add the exact MCP URL to `identifierUris`, without a trailing slash.
+3. Request the full scope, such as `https://mcp.example.com/mcp/mcp.access`.
 
-- **API-key inbound auth** for remote MCP access.
-- **Local `stdio` + `interactive`** for user OAuth login to TimeBase.
-- **Another IdP** that supports the MCP remote OAuth flow for inbound JWT auth.
-- **Gateway/proxy auth** in front of MCP.
+See the [Entra deployment steps](remote-deployment.md#microsoft-entra-id).
 
 ## Operation limit issues
 

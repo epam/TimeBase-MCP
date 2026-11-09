@@ -36,9 +36,10 @@ WebAdmin interactive login uses `TIMEBASE_WEBADMIN_REDIRECT_URI` independently o
 | Variable | Default | Description |
 | - | - | - |
 | `MCP_AUTH_ISSUER_URL` | discovered | IdP mode: issuer override. Required when TimeBase `/tb/oauthinfo` is empty or for a separate MCP API audience. |
-| `MCP_AUTH_JWKS_URL` | discovered | IdP mode: JWKS URL override. If unset, discovered from `/tb/oauthinfo`. |
-| `MCP_AUTH_AUDIENCE` | None | IdP mode: expected JWT audience/resource. **Required** for IdP inbound auth. |
-| `MCP_AUTH_REQUIRED_SCOPES` | None | Scopes required on inbound tokens. |
+| `MCP_AUTH_JWKS_URL` | discovered | IdP mode: JWKS URL override. If unset, discovered from `/tb/oauthinfo` or issuer metadata. |
+| `MCP_AUTH_AUDIENCE` | None | IdP mode: expected JWT audience (`aud`). **Required** for IdP inbound auth. |
+| `MCP_AUTH_REQUIRED_SCOPES` | None | Scopes required on inbound tokens and advertised to clients. |
+| `MCP_AUTH_SCOPE_ALIASES` | `{}` | JSON map from required permissions to delegated `scp` values. See [scope alias rules](authentication.md#inbound-mcp-authentication). |
 | `MCP_AUTH_PUBLIC_URL` | None | IdP mode: public URL of this MCP Resource Server. Required as a public endpoint for non-loopback HTTP binds. |
 | `MCP_AUTH_API_KEYS_FILE` | None | Path to a hashed API-key store |
 
