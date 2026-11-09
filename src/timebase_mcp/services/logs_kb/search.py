@@ -11,6 +11,8 @@ from timebase_mcp.models.logs_kb import LogsKBMatch, SearchLogsKBResult
 
 from .artifact import RuntimeEntry, load_runtime_entries
 
+MAX_RAW_QUERY_CHARACTERS = 65_536
+
 _DEFAULT_LIMIT = 5
 _QUERY_LINE_LIMIT = 8
 _QUERY_CHAR_LIMIT = 900
@@ -178,7 +180,15 @@ def _search_index(entries: SearchCorpus) -> _SearchIndex:
     return _SearchIndex(docs=docs, idf=idf)
 
 
+def _check_query_length(query: str) -> None:
+    if len(query) > MAX_RAW_QUERY_CHARACTERS:
+        raise ValueError(
+            f"query must contain at most {MAX_RAW_QUERY_CHARACTERS} characters"
+        )
+
+
 def search_logs_kb(query: str, limit: int = _DEFAULT_LIMIT) -> SearchLogsKBResult:
+    _check_query_length(query)
     return search_entries(load_runtime_entries(), query, limit=limit)
 
 
@@ -187,6 +197,7 @@ def search_entries(
     query: str,
     limit: int = _DEFAULT_LIMIT,
 ) -> SearchLogsKBResult:
+    _check_query_length(query)
     raw_query = query.strip()
     if not raw_query:
         raise ValueError("query must be a non-empty string")

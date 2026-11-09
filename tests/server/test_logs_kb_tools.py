@@ -9,7 +9,9 @@ from mcp_types import TextContent
 
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import ConfigurationError
+from timebase_mcp.models.logs_kb import SearchLogsKBResult
 from timebase_mcp.server import create_server
+from timebase_mcp.services.logs_kb.search import MAX_RAW_QUERY_CHARACTERS
 from timebase_mcp.tools import logs_kb as logs_kb_tools
 
 _SEARCH_LOGS_KB_TARGET = "search_logs_kb_service"
@@ -70,6 +72,62 @@ async def test_call_search_logs_kb_tool_returns_structured_payload(
             }
         ],
     }
+
+
+@pytest.mark.anyio
+async def test_search_logs_kb_tool_query_limit_accepts_unicode_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    received_queries: list[str] = []
+
+    def search_logs_kb(*, query: str, limit: int) -> SearchLogsKBResult:
+        received_queries.append(query)
+        return SearchLogsKBResult(query="stub query", normalized_query="stub query")
+
+    monkeypatch.setattr(logs_kb_tools, _SEARCH_LOGS_KB_TARGET, search_logs_kb)
+    query = " " + "💥" * (MAX_RAW_QUERY_CHARACTERS - 2) + " "
+
+    async with client_session_factory(None) as client_session:
+        tools = await client_session.list_tools()
+        tool = next(tool for tool in tools.tools if tool.name == "search_logs_kb")
+        assert (
+            tool.input_schema["properties"]["query"]["maxLength"]
+            == MAX_RAW_QUERY_CHARACTERS
+        )
+        result = await client_session.call_tool("search_logs_kb", {"query": query})
+
+    assert result.is_error is False
+    assert received_queries == [query]
+
+
+@pytest.mark.parametrize(
+    "character", ["x", "💥", " "], ids=["ascii", "unicode", "whitespace"]
+)
+@pytest.mark.anyio
+async def test_search_logs_kb_tool_rejects_oversized_query_before_search(
+    character: str,
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    def search_logs_kb(*, query: str, limit: int) -> SearchLogsKBResult:
+        pytest.fail("Oversized queries must be rejected before search")
+
+    monkeypatch.setattr(logs_kb_tools, _SEARCH_LOGS_KB_TARGET, search_logs_kb)
+
+    async with client_session_factory(None) as client_session:
+        result = await client_session.call_tool(
+            "search_logs_kb", {"query": character * (MAX_RAW_QUERY_CHARACTERS + 1)}
+        )
+
+    assert result.is_error is True
+    assert result.structured_content is None
 
 
 @pytest.mark.anyio

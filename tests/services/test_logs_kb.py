@@ -57,6 +57,52 @@ def test_search_logs_kb_rejects_limit_below_one() -> None:
         logs_kb_search.search_logs_kb("java.lang.IllegalStateException", limit=0)
 
 
+@pytest.mark.parametrize("character", ["a", "🙂"])
+def test_search_entries_accepts_max_raw_query_characters(character: str) -> None:
+    query = f" {character * 65_534} "
+
+    result = logs_kb_search.search_entries((), query)
+
+    assert result.query == character * 65_534
+    assert result.normalized_query == character * 900
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        pytest.param("x" * 65_537, id="text"),
+        pytest.param(" " * 65_537, id="whitespace"),
+        pytest.param(" " * 65_536 + "x", id="padding"),
+    ],
+)
+def test_search_entries_rejects_oversized_raw_query_before_normalizing(
+    monkeypatch: pytest.MonkeyPatch, query: str
+) -> None:
+    def fail_normalization(_query: str) -> str:
+        pytest.fail("oversized queries must not be normalized")
+
+    monkeypatch.setattr(logs_kb_search, "normalize_query_text", fail_normalization)
+
+    with pytest.raises(
+        ValueError, match="^query must contain at most 65536 characters$"
+    ):
+        logs_kb_search.search_entries((), query)
+
+
+def test_search_logs_kb_rejects_oversized_raw_query_before_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_loading() -> tuple[RuntimeEntry, ...]:
+        pytest.fail("oversized queries must not load runtime entries")
+
+    monkeypatch.setattr(logs_kb_search, "load_runtime_entries", fail_loading)
+
+    with pytest.raises(
+        ValueError, match="^query must contain at most 65536 characters$"
+    ):
+        logs_kb_search.search_logs_kb("x" * 65_537)
+
+
 def test_search_entries_returns_best_match(
     sample_runtime_entries: tuple[RuntimeEntry, ...],
 ) -> None:

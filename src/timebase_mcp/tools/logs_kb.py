@@ -6,6 +6,7 @@ from pydantic import Field
 from timebase_mcp.errors import TimeBaseMCPError
 from timebase_mcp.models.logs_kb import SearchLogsKBResult
 from timebase_mcp.runtime.state import TimeBaseRuntime
+from timebase_mcp.services.logs_kb.search import MAX_RAW_QUERY_CHARACTERS
 from timebase_mcp.services.logs_kb.search import (
     search_logs_kb as search_logs_kb_service,
 )
@@ -28,6 +29,7 @@ def register_logs_kb_tools(mcp: MCPServer) -> None:
     async def search_logs_kb(
         ctx: Context[TimeBaseRuntime],
         query: str = Field(
+            max_length=MAX_RAW_QUERY_CHARACTERS,
             description="Raw log text, stack trace, or error excerpt to search for."
         ),
         limit: int = Field(
