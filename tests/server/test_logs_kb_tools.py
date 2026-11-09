@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from threading import Event, get_ident
 
 import pytest
 from mcp.client import Client
@@ -15,6 +17,41 @@ from timebase_mcp.services.logs_kb.search import MAX_RAW_QUERY_CHARACTERS
 from timebase_mcp.tools import logs_kb as logs_kb_tools
 
 _SEARCH_LOGS_KB_TARGET = "search_logs_kb_service"
+
+
+@pytest.mark.anyio
+async def test_search_logs_kb_tool_keeps_event_loop_responsive(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None],
+        AbstractAsyncContextManager[Client],
+    ],
+) -> None:
+    loop = asyncio.get_running_loop()
+    event_loop_thread = get_ident()
+    started = asyncio.Event()
+    release = Event()
+
+    def search_logs_kb(*, query: str, limit: int) -> SearchLogsKBResult:
+        loop.call_soon_threadsafe(started.set)
+        assert get_ident() != event_loop_thread
+        assert release.wait(5), "The event loop did not release the search worker"
+        return SearchLogsKBResult(query=query, normalized_query=query)
+
+    monkeypatch.setattr(logs_kb_tools, _SEARCH_LOGS_KB_TARGET, search_logs_kb)
+
+    async with client_session_factory(None) as client_session:
+        call = asyncio.create_task(
+            client_session.call_tool("search_logs_kb", {"query": "error excerpt"})
+        )
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            assert not call.done()
+        finally:
+            release.set()
+            result = await call
+
+    assert result.is_error is False
 
 
 @pytest.mark.anyio
