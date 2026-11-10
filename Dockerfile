@@ -11,10 +11,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
 
-RUN uv build --no-sources --wheel \
-    && uv venv /opt/timebase-mcp \
-    && wheel="$(echo dist/timebase_mcp-*.whl)" \
-    && uv pip install --no-config --python /opt/timebase-mcp/bin/python "${wheel}[all]"
+RUN UV_PROJECT_ENVIRONMENT=/opt/timebase-mcp \
+    uv sync --locked --no-default-groups --extra all --no-editable
 
 FROM python:${PYTHON_VERSION}-slim-trixie AS runtime
 
