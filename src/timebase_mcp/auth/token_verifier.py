@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import hmac
 import logging
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import jwt
+from anyio import CapacityLimiter
+from anyio.to_thread import run_sync
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from typing_extensions import override
 
@@ -16,6 +17,8 @@ from timebase_mcp.auth.scopes import is_scope_token
 logger = logging.getLogger(__name__)
 
 _DEFAULT_ALGORITHMS: tuple[str, ...] = ("RS256",)
+# Match AnyIO's worker limit, with capacity reserved for authentication.
+_AUTH_WORKER_LIMIT = 40
 
 
 def extract_scopes(claims: dict[str, Any]) -> list[str]:
@@ -68,11 +71,14 @@ class JwksTokenVerifier(TokenVerifier):
         self._scope_aliases = dict(scope_aliases or {})
         self._algorithms = list(algorithms)
         self._client_id_claim = client_id_claim
+        self._worker_limiter = CapacityLimiter(_AUTH_WORKER_LIMIT)
 
     @override
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
-            return await asyncio.to_thread(self._verify_sync, token)
+            return await run_sync(
+                self._verify_sync, token, limiter=self._worker_limiter
+            )
         except Exception:
             logger.debug("Inbound token verification failed.", exc_info=True)
             return None
@@ -127,10 +133,13 @@ class ApiKeyStoreVerifier(TokenVerifier):
 
     def __init__(self, store: KeyStore) -> None:
         self._store = store
+        self._worker_limiter = CapacityLimiter(_AUTH_WORKER_LIMIT)
 
     @override
     async def verify_token(self, token: str) -> AccessToken | None:
-        return await asyncio.to_thread(self._verify_sync, token)
+        return await run_sync(
+            self._verify_sync, token, limiter=self._worker_limiter
+        )
 
     def _verify_sync(self, token: str) -> AccessToken | None:
         token_hash = hash_key(token)
