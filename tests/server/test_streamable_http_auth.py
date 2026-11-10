@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import anyio.to_thread
 import httpx2
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from jwt.algorithms import RSAAlgorithm
 from mcp.client.auth import OAuthClientProvider
+from mcp.server.auth.middleware.bearer_auth import (
+    BearerAuthBackend,
+    RequireAuthMiddleware,
+)
+from mcp.server.auth.provider import TokenVerifier
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.auth import (
     AuthorizationCodeResult,
@@ -19,19 +29,29 @@ from mcp.shared.auth import (
     OAuthClientMetadata,
     OAuthToken,
 )
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.routing import Route
 from starlette.testclient import TestClient
 from typing_extensions import override
 
+from tests.auth.helpers import make_rsa_verifier
 from tests.stubs import StubTimeBaseClient
 from tests.support.mcp_http import (
     build_client_meta,
     build_modern_headers,
     parse_jsonrpc_response,
 )
+from timebase_mcp.auth import keystore
+from timebase_mcp.auth.keystore import KeyStore
 from timebase_mcp.auth.outbound import (
     TimeBaseCredentials,
     resolve_timebase_credentials,
 )
+from timebase_mcp.auth.token_verifier import ApiKeyStoreVerifier
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.models.core import StreamInfo
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
@@ -42,6 +62,87 @@ _SCOPE = f"{_RESOURCE}/mcp.access"
 _ISSUER = "https://login.example.com/tenant/v2.0"
 _AUDIENCE = "shared-api-application-id"
 _CLIENT_META = build_client_meta(client_name="shared-resource-auth-test")
+
+
+def _single_worker_loop() -> asyncio.AbstractEventLoop:
+    loop = asyncio.new_event_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+    return loop
+
+
+@pytest.mark.parametrize("auth_mode", ["api_key", "jwt"])
+@pytest.mark.parametrize(
+    "anyio_backend",
+    [("asyncio", {"loop_factory": _single_worker_loop})],
+    ids=["single-worker"],
+)
+@pytest.mark.anyio
+async def test_http_auth_works_when_worker_pools_are_saturated(
+    tmp_path: Path, anyio_backend: object, auth_mode: str
+) -> None:
+    verifier: TokenVerifier
+    if auth_mode == "jwt":
+        verifier, signing_key = make_rsa_verifier(required_scopes=["read"])
+        token = jwt.encode(
+            {"iss": "https://idp.example", "scope": "read", "exp": int(time.time()) + 300},
+            signing_key,
+            algorithm="RS256",
+        )
+    else:
+        record, token = keystore.build_record(name="alice", scopes=["read"])
+        keys_file = tmp_path / "keys.json"
+        keystore.write_store(keys_file, [record])
+        verifier = ApiKeyStoreVerifier(KeyStore(keys_file))
+
+    async def accepted(_request: Request) -> Response:
+        return Response(status_code=202)
+
+    app = Starlette(
+        routes=[Route("/mcp", accepted, methods=["POST"])],
+        middleware=[
+            Middleware(AuthenticationMiddleware, backend=BearerAuthBackend(verifier)),
+            Middleware(RequireAuthMiddleware, required_scopes=["read"]),
+        ],
+    )
+    loop = asyncio.get_running_loop()
+    release = threading.Event()
+    native_started, anyio_started = asyncio.Event(), asyncio.Event()
+
+    def occupy_worker(started: asyncio.Event) -> None:
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(5), "Worker was not released during cleanup"
+
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    previous_tokens = limiter.total_tokens
+    limiter.total_tokens = 1
+    native_worker = loop.run_in_executor(None, occupy_worker, native_started)
+    anyio_worker = asyncio.create_task(
+        anyio.to_thread.run_sync(occupy_worker, anyio_started)
+    )
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(native_started.wait(), anyio_started.wait()), timeout=2
+        )
+        async with httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app), base_url="https://mcp.example.com"
+        ) as client:
+            response = await asyncio.wait_for(
+                client.post("/mcp", headers={"Authorization": f"Bearer {token}"}),
+                timeout=1,
+            )
+            assert response.status_code == 202
+            rejected = await asyncio.wait_for(
+                client.post("/mcp", headers={"Authorization": "Bearer invalid"}),
+                timeout=1,
+            )
+            assert rejected.status_code == 401
+    finally:
+        limiter.total_tokens = previous_tokens
+        release.set()
+        await asyncio.wait_for(
+            asyncio.gather(native_worker, anyio_worker, return_exceptions=True),
+            timeout=2,
+        )
 
 
 @dataclass
