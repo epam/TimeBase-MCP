@@ -64,7 +64,8 @@ class JwksTokenVerifier(TokenVerifier):
         algorithms: Iterable[str] = _DEFAULT_ALGORITHMS,
         client_id_claim: str = "azp",
     ) -> None:
-        self._jwks_client = jwt.PyJWKClient(jwks_uri, cache_keys=True)
+        # Keep only the expiring JWKS cache so removed keys are forgotten.
+        self._jwks_client = jwt.PyJWKClient(jwks_uri)
         self._issuer = issuer
         self._audience = audience
         self._required_scopes = list(required_scopes or [])
