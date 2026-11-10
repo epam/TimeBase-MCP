@@ -1086,6 +1086,92 @@ async def test_run_with_runtime_interrupts_when_worker_pools_are_saturated(
         await runtime.aclose()
 
 
+@pytest.mark.parametrize("stop", ["cancel", "timeout"])
+@pytest.mark.parametrize(
+    "anyio_backend",
+    [("asyncio", {"loop_factory": _single_worker_loop})],
+    ids=["single-worker"],
+)
+@pytest.mark.anyio
+async def test_run_with_runtime_does_not_execute_stopped_queued_operation(
+    monkeypatch: pytest.MonkeyPatch, anyio_backend: object, stop: str
+) -> None:
+    bound = asyncio.Event()
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    operation_called = threading.Event()
+    created_clients: list[StubClient] = []
+
+    class QueuedClient(StubClient):
+        @override
+        def bind_operation(self) -> None:
+            super().bind_operation()
+            bound.set()
+
+    def build_client(instance: TimeBaseInstanceRuntime) -> StubClient:
+        client = QueuedClient(key=instance.key)
+        created_clients.append(client)
+        return client
+
+    def occupy_worker() -> None:
+        worker_started.set()
+        _wait_for_test_release(release_worker)
+
+    def queued_operation(_client: TimeBaseClient) -> None:
+        operation_called.set()
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.factory.create_timebase_client", build_client
+    )
+    monkeypatch.setattr(operations_module, "_COOPERATIVE_STOP_GRACE_SECONDS", 0.01)
+    runtime = build_runtime(
+        MCPSettings(
+            operation_timeout_seconds=1 if stop == "timeout" else 0,
+            max_concurrent_ops=1,
+        )
+    )
+    await run_with_runtime(runtime, lambda client: None)
+    bound.clear()
+    blocker = asyncio.get_running_loop().run_in_executor(None, occupy_worker)
+    task = asyncio.create_task(run_with_runtime(runtime, queued_operation))
+    pool = runtime.default_instance.get_connection_pool()
+
+    try:
+        await _wait_for_thread_event(worker_started, "Executor worker did not start.")
+        await asyncio.wait_for(bound.wait(), timeout=1)
+        if stop == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            with pytest.raises(TimeBaseOperationTimeoutError):
+                await task
+
+        await _wait_for_thread_event(
+            created_clients[0].closed_event, "Queued operation was not interrupted."
+        )
+        release_worker.set()
+        await _with_timeout(blocker, "Executor worker did not finish.")
+        await _with_timeout(
+            asyncio.gather(*tuple(pool._background_tasks)),
+            "Stopped operation cleanup did not finish.",
+        )
+        assert not operation_called.is_set()
+        assert await _run_when_budget_is_released(runtime) != id(created_clients[0])
+    finally:
+        release_worker.set()
+        task.cancel()
+        await _with_timeout(
+            asyncio.gather(task, blocker, return_exceptions=True),
+            "Queued operation did not finish during cleanup.",
+        )
+        await _with_timeout(
+            asyncio.gather(*tuple(pool._background_tasks)),
+            "Stopped operation cleanup did not finish.",
+        )
+        await runtime.aclose()
+
+
 @pytest.mark.anyio
 async def test_run_with_runtime_reports_monotonic_progress_heartbeat(
     monkeypatch: pytest.MonkeyPatch,
