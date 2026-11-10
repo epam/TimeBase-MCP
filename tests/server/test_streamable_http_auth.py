@@ -84,7 +84,11 @@ async def test_http_auth_works_when_worker_pools_are_saturated(
     if auth_mode == "jwt":
         verifier, signing_key = make_rsa_verifier(required_scopes=["read"])
         token = jwt.encode(
-            {"iss": "https://idp.example", "scope": "read", "exp": int(time.time()) + 300},
+            {
+                "iss": "https://idp.example",
+                "scope": "read",
+                "exp": int(time.time()) + 300,
+            },
             signing_key,
             algorithm="RS256",
         )

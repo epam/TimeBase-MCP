@@ -100,7 +100,9 @@ async def test_jwks_verifier_accepts_valid_token() -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("refresh_with_new_key", [False, True], ids=["expiry", "rotation"])
+@pytest.mark.parametrize(
+    "refresh_with_new_key", [False, True], ids=["expiry", "rotation"]
+)
 async def test_jwks_verifier_refreshes_cached_signing_keys(
     monkeypatch: pytest.MonkeyPatch,
     jwt_claims: dict[str, object],

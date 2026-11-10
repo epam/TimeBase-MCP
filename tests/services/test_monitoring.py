@@ -9,6 +9,7 @@ from pydantic import SecretStr
 
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.errors import TimeBaseOperationError
+from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 from timebase_mcp.runtime.state import TimeBaseRuntime, build_runtime
 from timebase_mcp.services.monitoring import (
     get_timebase_activity_detail,
@@ -226,6 +227,34 @@ async def test_get_timebase_status_includes_license_and_runtime() -> None:
     assert status.runtime.os_name == "Mac OS X"
     assert status.runtime.java_version == "21"
     assert status.warnings == []
+
+
+@pytest.mark.anyio
+async def test_get_timebase_status_sanitizes_http_url_without_changing_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    http_url = (
+        "https://reader:status-password@tb.example.com:8021/context"
+        "?token=status-query#status-fragment"
+    )
+    runtime = _runtime(http_url)
+    instance = runtime.default_instance
+
+    def fake_request(target: TimeBaseInstanceRuntime, endpoint: str) -> httpx2.Response:
+        assert target is instance
+        assert target.config.http_base_url == http_url
+        assert target.resolved_http_base_url == http_url
+        return _response("http://tb.example.com:8021/tb" + endpoint)
+
+    monkeypatch.setattr(
+        "timebase_mcp.services.monitoring.timebase_http_request", fake_request
+    )
+
+    status = await get_timebase_status(runtime)
+
+    assert status.http_url == "https://tb.example.com:8021/context"
+    assert instance.config.http_base_url == http_url
+    assert instance.resolved_http_base_url == http_url
 
 
 @pytest.mark.anyio

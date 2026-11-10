@@ -6,6 +6,7 @@ from timebase_mcp.config.env import (
     dxapi_ssl_termination_enabled,
     dxapi_ssl_trust_all_enabled,
 )
+from timebase_mcp.config.urls import sanitize_url_for_log
 from timebase_mcp.models.core import MCPServerConfiguration, TimeBaseServerConfiguration
 from timebase_mcp.runtime.instance import TimeBaseInstanceRuntime
 from timebase_mcp.runtime.state import TimeBaseRuntime
@@ -23,7 +24,11 @@ def timebase_server_configuration(
         username=config.tb_username,
         edition=get_detected_edition(instance),
         outbound_auth_mode=config.auth_mode,
-        http_url=config.http_base_url,
+        http_url=(
+            sanitize_url_for_log(config.http_base_url)
+            if config.http_base_url is not None
+            else None
+        ),
         webadmin_url=config.webadmin.url,
         read_only=config.read_only,
         dxapi_ssl_termination=dxapi_ssl_termination_enabled(),

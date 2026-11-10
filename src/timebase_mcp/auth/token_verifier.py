@@ -138,9 +138,7 @@ class ApiKeyStoreVerifier(TokenVerifier):
 
     @override
     async def verify_token(self, token: str) -> AccessToken | None:
-        return await run_sync(
-            self._verify_sync, token, limiter=self._worker_limiter
-        )
+        return await run_sync(self._verify_sync, token, limiter=self._worker_limiter)
 
     def _verify_sync(self, token: str) -> AccessToken | None:
         token_hash = hash_key(token)

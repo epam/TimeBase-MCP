@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 
@@ -137,6 +138,55 @@ async def test_call_get_timebase_status_tool(
     assert result.structured_content["security"]["enabled"] is True
     assert result.structured_content["license"]["valid_until"] == "2026-12-31"
     assert result.structured_content["runtime"]["java_version"] == "21"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "tool_name", ["get_server_configuration", "get_timebase_status"]
+)
+async def test_diagnostic_tools_sanitize_http_urls(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None], AbstractAsyncContextManager[Client]
+    ],
+    tool_name: str,
+) -> None:
+    url = (
+        "https://diagnostic-user:diagnostic-password@[::1]:8021/context"
+        "?token=diagnostic-query#diagnostic-fragment"
+    )
+    settings = MCPSettings(tb_auth_mode="none", tb_http_url=url)
+
+    def fake_request(
+        method: str, url: str, *, timeout: float, verify: bool
+    ) -> httpx2.Response:
+        return httpx2.Response(200, request=httpx2.Request(method, url), json={})
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
+    )
+    async with client_session_factory(settings) as client_session:
+        result = await client_session.call_tool(tool_name, {})
+
+    assert result.is_error is False
+    payload = result.structured_content
+    assert payload is not None
+    if tool_name == "get_server_configuration":
+        payload = payload["timebase_instances"][0]
+    assert payload["http_url"] == "https://[::1]:8021/context"
+    for secret in (
+        "diagnostic-user",
+        "diagnostic-password",
+        "diagnostic-query",
+        "diagnostic-fragment",
+    ):
+        assert secret not in json.dumps(result.structured_content)
+        assert all(
+            secret not in content.text
+            for content in result.content
+            if isinstance(content, TextContent)
+        )
+    assert settings.tb_http_url == url
 
 
 @pytest.mark.anyio
