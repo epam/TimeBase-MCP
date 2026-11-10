@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from unittest.mock import Mock
 
 import httpx2
 import pytest
@@ -10,6 +11,7 @@ from mcp.client import Client
 from mcp_types import TextContent
 from pydantic import SecretStr
 
+from timebase_mcp.auth.oauth2 import UrlLibTokenEndpointClient
 from timebase_mcp.clients import factory as client_factory
 from timebase_mcp.config.settings import MCPSettings
 from timebase_mcp.runtime.introspection import build_server_configuration
@@ -138,6 +140,59 @@ async def test_call_get_timebase_status_tool(
     assert result.structured_content["security"]["enabled"] is True
     assert result.structured_content["license"]["valid_until"] == "2026-12-31"
     assert result.structured_content["runtime"]["java_version"] == "21"
+
+
+@pytest.mark.anyio
+async def test_status_tool_does_not_disclose_malformed_oauth_token(
+    monkeypatch: pytest.MonkeyPatch,
+    client_session_factory: Callable[
+        [MCPSettings | None], AbstractAsyncContextManager[Client]
+    ],
+) -> None:
+    secret = "synthetic-service-bearer-secret"
+    monkeypatch.setattr(
+        UrlLibTokenEndpointClient,
+        "post_form",
+        Mock(return_value={"access_token": secret + "\n"}),
+    )
+    authenticated_requests: list[dict[str, str]] = []
+
+    def fake_request(
+        method: str,
+        url: str,
+        *,
+        timeout: float,
+        verify: bool,
+        headers: dict[str, str] | None = None,
+    ) -> httpx2.Response:
+        if headers is not None:
+            authenticated_requests.append(headers)
+            raise httpx2.LocalProtocolError(
+                f"Illegal header value {headers['Authorization']!r}"
+            )
+        return httpx2.Response(200, request=httpx2.Request(method, url), json={})
+
+    monkeypatch.setattr(
+        "timebase_mcp.clients.http.transport.httpx2.request", fake_request
+    )
+    settings = MCPSettings(
+        tb_http_url="https://tb.example.com:8021",
+        tb_auth_mode="oauth2_client_credentials",
+        tb_oauth2_token_url="https://idp.example/token",
+        tb_oauth2_client_id="client",
+        tb_oauth2_client_secret=SecretStr("client-secret"),
+    )
+    async with client_session_factory(settings) as client_session:
+        result = await client_session.call_tool("get_timebase_status", {})
+
+    assert result.is_error is True
+    text = "\n".join(
+        item.text for item in result.content if isinstance(item, TextContent)
+    )
+    assert secret not in text
+    assert secret not in json.dumps(result.structured_content)
+    assert "valid access_token" in text
+    assert authenticated_requests == []
 
 
 @pytest.mark.anyio
