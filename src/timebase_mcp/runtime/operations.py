@@ -79,9 +79,14 @@ async def run_with_runtime(
         principal_key, pool = _resolve_pool(instance)
         lease = await pool.acquire()
         lease.client.bind_operation()
+
+        def execute(client: TimeBaseClient) -> ResultT:
+            client.raise_if_cancelled()
+            return operation(client)
+
         operation_future = asyncio.get_running_loop().run_in_executor(
             None,
-            operation,
+            execute,
             lease.client,
         )
 
