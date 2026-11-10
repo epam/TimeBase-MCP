@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import io
+import json
 from pathlib import Path
 from time import time
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt.algorithms import RSAAlgorithm
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
@@ -18,6 +23,7 @@ from timebase_mcp.auth.keystore import KeyStore
 from timebase_mcp.auth.principal import current_principal
 from timebase_mcp.auth.token_verifier import (
     ApiKeyStoreVerifier,
+    JwksTokenVerifier,
     decode_claims_unverified,
     extract_scopes,
 )
@@ -91,6 +97,54 @@ async def test_jwks_verifier_accepts_valid_token() -> None:
     assert access.subject == "user-1"
     assert access.client_id == "mcp-client"
     assert access.scopes == ["timebase.read"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("refresh_with_new_key", [False, True], ids=["expiry", "rotation"])
+async def test_jwks_verifier_refreshes_cached_signing_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    jwt_claims: dict[str, object],
+    refresh_with_new_key: bool,
+) -> None:
+    keys = {
+        kid: rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        for kid in ("old", "new")
+    }
+    tokens = {
+        kid: jwt.encode(jwt_claims, key, algorithm="RS256", headers={"kid": kid})
+        for kid, key in keys.items()
+    }
+    responses = []
+    for kid, key in keys.items():
+        jwk = RSAAlgorithm.to_jwk(key.public_key(), as_dict=True)
+        jwk["kid"] = kid
+        responses.append(io.BytesIO(json.dumps({"keys": [jwk]}).encode()))
+    fetch = Mock(side_effect=responses)
+    monkeypatch.setattr(
+        "jwt.jwks_client.urllib.request.build_opener",
+        Mock(return_value=SimpleNamespace(open=fetch)),
+    )
+    now = 0.0
+    clock = SimpleNamespace(monotonic=lambda: now)
+    for module in ("jwt.api_jwk", "jwt.jwk_set_cache", "jwt.jwks_client"):
+        monkeypatch.setattr(f"{module}.time", clock)
+    verifier = JwksTokenVerifier(
+        jwks_uri="https://idp.example/jwks",
+        issuer="https://idp.example",
+        audience="shared-api",
+    )
+
+    assert await verifier.verify_token(tokens["old"]) is not None
+    assert await verifier.verify_token(tokens["old"]) is not None
+    assert fetch.call_count == 1
+
+    now = 31.0 if refresh_with_new_key else 301.0
+    if refresh_with_new_key:
+        assert await verifier.verify_token(tokens["new"]) is not None
+
+    assert await verifier.verify_token(tokens["old"]) is None
+    assert await verifier.verify_token(tokens["new"]) is not None
+    assert fetch.call_count == 2
 
 
 @pytest.mark.anyio
