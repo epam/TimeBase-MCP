@@ -11,6 +11,7 @@ from timebase_mcp.clients.http.responses import (
 )
 from timebase_mcp.clients.http.transport import timebase_http_request
 from timebase_mcp.clients.http.urls import quote_path_segment
+from timebase_mcp.config.urls import sanitize_url_for_log
 from timebase_mcp.errors import TimeBaseOperationError
 from timebase_mcp.models.monitoring import (
     TimeBaseActivityDetail,
@@ -89,7 +90,11 @@ def _status_sync(instance: TimeBaseInstanceRuntime) -> TimeBaseStatus:
 
     return TimeBaseStatus(
         instance_key=instance.key,
-        http_url=instance.resolved_http_base_url,
+        http_url=(
+            sanitize_url_for_log(instance.resolved_http_base_url)
+            if instance.resolved_http_base_url is not None
+            else None
+        ),
         version=_str(info.get("version")),
         security=_security_summary(security_payload) if security_payload else None,
         license=_license_summary(license_payload) if license_payload else None,
