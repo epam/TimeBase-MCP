@@ -79,7 +79,12 @@ def parse_token_response(
         )
 
     access_token = token_response.get("access_token")
-    if not isinstance(access_token, str) or not access_token:
+    # Reject unsafe header values before HTTP libraries can echo them in errors.
+    if (
+        not isinstance(access_token, str)
+        or not access_token
+        or any(ord(c) < 33 or ord(c) > 126 for c in access_token)
+    ):
         raise ValueError(access_token_error)
 
     refresh_token_value = token_response.get("refresh_token")

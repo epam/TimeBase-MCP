@@ -379,14 +379,67 @@ def test_oauth2_provider_raises_for_invalid_expires_in() -> None:
         provider.get_access_token()
 
 
-def test_shared_token_parser_returns_refresh_token_and_expiry() -> None:
+@pytest.mark.parametrize(
+    "invalid_character", ["\r", "\n", "\t", " ", "\x00", "\x1f", "\x7f", "\u00e9"]
+)
+def test_shared_token_parser_rejects_unsafe_access_tokens(
+    invalid_character: str,
+) -> None:
+    with pytest.raises(ValueError) as exc:
+        parse_token_response(
+            {"access_token": "private-access-token" + invalid_character},
+            monotonic=Clock(100.0),
+            access_token_error="Invalid access_token.",
+        )
+
+    assert str(exc.value) == "Invalid access_token."
+
+
+@pytest.mark.parametrize("mode", ["password", "client_credentials"])
+def test_token_provider_does_not_cache_unsafe_access_token(mode: str) -> None:
+    urlopen = Mock(
+        side_effect=[
+            token_response({"access_token": "private-access-token\n"}),
+            token_response({"access_token": "valid-token", "expires_in": 3600}),
+        ]
+    )
+    if mode == "password":
+        provider = OAuth2PasswordProvider(
+            OAuth2PasswordConfig(
+                token_url="https://idp.example/token",
+                username="user",
+                password="password",
+                client_id="client",
+                client_secret="secret",
+            ),
+            urlopen=urlopen,
+        )
+    else:
+        provider = OAuth2ClientCredentialsProvider(
+            build_oauth2_config(), urlopen=urlopen
+        )
+
+    with pytest.raises(ValueError, match="valid access_token") as exc:
+        provider.get_access_token()
+    assert "private-access-token" not in str(exc.value)
+    assert provider.get_access_token() == "valid-token"
+    assert provider.get_access_token() == "valid-token"
+    assert urlopen.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "access_token", ["token-1", "header.payload.signature", "!opaque:/+=,~"]
+)
+def test_shared_token_parser_returns_refresh_token_and_expiry(
+    access_token: str,
+) -> None:
     parsed = parse_token_response(
-        {"access_token": "token-1", "refresh_token": "refresh-1", "expires_in": 120},
+        {"access_token": access_token, "refresh_token": "refresh-1", "expires_in": 120},
         monotonic=Clock(100.0),
         access_token_error="missing token",
     )
 
-    assert parsed.access_token == "token-1"
+    assert parsed.access_token == access_token
     assert parsed.refresh_token == "refresh-1"
     assert parsed.expires_at_monotonic == 220.0
 
